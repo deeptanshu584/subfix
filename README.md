@@ -10,7 +10,8 @@ subfix never overwrites your files. Results go next to the video as `movie.synce
 `movie.generated.srt`.
 
 It is built for an ordinary laptop. The development machine has an RTX 4050 with 6 GB of VRAM,
-16 GB of RAM and runs Windows 11. A 3-hour film doesn't need more memory than a 10-minute clip.
+16 GB of RAM and runs Windows 11. Memory use barely depends on film length (peak 1.9 GB for a
+12-minute film, 2.3 GB for a 100-minute one, mostly the Whisper model).
 
 ```text
 $ subfix movie.mkv
@@ -49,6 +50,9 @@ subfix generate movie.mkv --lang fr --translate
 
 # Sync a specific subtitle file with a specific algorithm
 subfix sync movie.mkv movie.srt --mode drift
+
+# English subtitles for a foreign-language film (Whisper translation)
+subfix generate film.mkv --translate
 
 # Show the GPU, the default models, the ffmpeg location and the cache directory
 subfix info
@@ -94,7 +98,7 @@ Silero VAD runs through the ONNX model bundled with faster-whisper.
 ```powershell
 winget install --id Gyan.FFmpeg.Essentials -e
 
-git clone {{REPO_URL}} subfix
+git clone <this-repo-url> subfix   # or use your existing checkout, e.g. <repo>
 cd subfix
 py -3.13 -m venv .venv
 .venv\Scripts\activate
@@ -145,9 +149,10 @@ setx SUBFIX_HOME D:\subfix-cache
 pip install -e ".[dev]"
 ```
 
-subfix detects that CUDA is unavailable and uses `small` / `int8`. Generation runs at roughly
-0.3–0.5× real time. `auto` mode uses the fast audio-only sync on CPU, which doesn't need Whisper.
-Pass `--mode smart` to transcribe anyway.
+subfix detects that CUDA is unavailable and uses `small` / `int8`. On the development
+machine's i5-12450HX that generates subtitles at about 12× real time (a 2-hour film in ~10
+minutes). `auto` mode uses the fast audio-only sync on CPU, which takes seconds and doesn't need
+Whisper; pass `--mode smart` to transcribe anyway.
 
 ### Linux / macOS
 
@@ -327,12 +332,30 @@ and every cue stays on screen for at least about 0.8 s.
 **Metrics:** mean and median absolute error of cue start times, and the percentage of lines
 within 200 ms of the truth.
 
-<!-- BENCH:TABLE -->
+% of lines within 200 ms of the truth (median error in ms), 5 random corruptions each:
 
-Across the corpus, smart sync places **{{SMART_WITHIN200}}** of lines within 200 ms of the
-truth. Audio-only sync (drift + piecewise, no Whisper) places **{{AUDIO_WITHIN200}}** within
-200 ms. Subtitle generation with `large-v3-turbo` / `int8_float16` on the RTX 4050 runs at
-**{{GEN_SPEED}}**.
+| Corruption | Material | uncorrected | offset | drift | piecewise | smart |
+|---|---|---:|---:|---:|---:|---:|
+| offset | Synthetic (12 + 100 min) | 0.0% (30.4 s) | 100.0% (20 ms) | 100.0% (20 ms) | 100.0% (20 ms) | 100.0% (22 ms) |
+| offset | Tears of Steel (EN subs) | 0.0% (30.4 s) | 100.0% (120 ms) | 100.0% (111 ms) | 100.0% (111 ms) | 100.0% (63 ms) |
+| drift | Synthetic (12 + 100 min) | 1.3% (71.6 s) | 2.7% (45.2 s) | 100.0% (20 ms) | 100.0% (20 ms) | 100.0% (23 ms) |
+| drift | Tears of Steel (EN subs) | 0.0% (8.7 s) | 16.6% (3.5 s) | 100.0% (121 ms) | 100.0% (121 ms) | 94.5% (64 ms) |
+| piecewise | Synthetic (12 + 100 min) | 0.0% (5.6 s) | 61.4% (21 ms) | 61.4% (22 ms) | 100.0% (19 ms) | 100.0% (19 ms) |
+| piecewise | Tears of Steel (EN subs) | 0.0% (5.6 s) | 44.4% (207 ms) | 44.4% (377 ms) | 84.8% (126 ms) | 86.2% (52 ms) |
+
+Across all 19,251 corrupted cue placements, smart sync puts **99.4 %** of lines within 200 ms
+of the truth (median error 21 ms) and audio-only sync (`--mode piecewise`, no Whisper) also
+**99.4 %** (median 20 ms); uncorrected it is 0.4 %. On the synthetic films every mode that
+matches the corruption is at 100 %. On the real film the picture is more nuanced: smart sync is
+the most *precise* (median 52–64 ms vs 111–126 ms for audio-only — text pins the position even
+under a loud score), but both drop to ~85 % within 200 ms when the cut lands in the film's
+climax, where neither VAD nor Whisper hears the shouted lines.
+
+Subtitle generation (`subfix generate`, end to end without cache) runs at **76× real time** on
+the 100-minute film with `large-v3-turbo` / `int8_float16` on the RTX 4050 (79 s, WER 2.1 %),
+and at **12× real time on the CPU alone** with `small` / `int8` (WER 3.1 %). Translation
+(`--translate`, `large-v3`) was checked on a German LibriVox recording: 91 s of audio in 21 s,
+fluent English output.
 
 ---
 
@@ -351,6 +374,10 @@ installation and options.
 
 - **Audio** is extracted once to a 16 kHz mono int16 WAV in the cache. A 3-hour film takes
   ~345 MB. The WAV is read through `numpy.memmap` and never loaded fully into RAM.
+- **Surround sound:** for 5.1/7.1 tracks subfix extracts mostly the centre channel
+  (`0.8·FC + 0.1·FL + 0.1·FR`), where films put dialogue. In a test with speech on the centre
+  channel and loud noise on the other five, the extracted audio correlated 0.95 with the clean
+  speech versus 0.31 for a plain downmix.
 - **VAD** runs Silero over fixed 10-minute chunks of the memory-mapped audio. The resulting
   probability signal (one float per 32 ms) is cached as `.npy`.
 - **Whisper** gets ~10-minute chunks cut at silences, batched on the GPU. Each chunk is freed
@@ -361,9 +388,10 @@ installation and options.
 - **Sync** works on 10 ms grids with FFTs and prefix sums. The audio-only methods take seconds
   even for long films.
 
-On the 100-minute synthetic film, a full run without a cache takes **{{LONG_FILM_TIME}}**. Peak
-resident memory, measured with [`benchmarks/peakmem.py`](benchmarks/peakmem.py), is
-**{{PEAK_RAM}}**.
+On the 100-minute synthetic film, a full `generate` run without a cache takes **79 s**. Peak
+resident memory of the whole process tree is **2.1 GB**, versus 1.9 GB for the 12-minute film:
+memory is dominated by the model, not by the film length. Audio-only sync of the 100-minute
+film takes 6–13 s; smart sync takes ~4 s once the transcript is cached.
 
 ---
 
@@ -377,6 +405,10 @@ resident memory, measured with [`benchmarks/peakmem.py`](benchmarks/peakmem.py),
   works, and it can't use the text at all.
 - **Loud music and effects** reduce Silero's speech probabilities. The adaptive threshold helps,
   but audio-only sync is clearly less precise on films with heavy scores than on clean dialogue.
+  Sections that are only shouting over music (Tears of Steel's climax) defeat both VAD and
+  Whisper; a cut that falls there can leave those lines misplaced.
+- **Repeated dialogue** (a scene that replays earlier lines with the same rhythm) can make
+  audio-only piecewise sync ambiguous; smart sync resolves it through text order.
 - **One global drift.** Audio-only sync models a single scale plus piecewise offsets. Sections
   with *different* frame-rate errors, or scenes that were reordered, aren't handled. Cues are
   never reordered. Very short sections with only a few lines may get absorbed into their
@@ -387,8 +419,8 @@ resident memory, measured with [`benchmarks/peakmem.py`](benchmarks/peakmem.py),
   and the hallucination filter is heuristic too.
 - **External subtitle files only.** Subtitle tracks embedded in an MKV aren't read yet. Only one
   audio track is used per run (`--audio-track`).
-- **The mpv plugin** doesn't show a real progress bar. It shows the current step and an elapsed
-  timer on the OSD.
+- **The mpv plugin** doesn't show a real progress bar: mpv only hands over subfix's output when
+  it exits, so the OSD shows what is being done and an elapsed timer.
 - **Tested platform:** subfix was developed and benchmarked on Windows 11 with one NVIDIA GPU.
   Linux and macOS haven't been tested.
 
@@ -397,8 +429,6 @@ resident memory, measured with [`benchmarks/peakmem.py`](benchmarks/peakmem.py),
 ## Roadmap
 
 - Read and sync subtitle tracks embedded in MKV/MP4.
-- Extract the center channel of 5.1 audio so that VAD and Whisper hear dialogue rather than
-  music.
 - Speaker-aware cue splitting for generated subtitles.
 - A small GUI and/or a VLC extension.
 - Packaging: a PyPI release and a standalone Windows build.
@@ -449,7 +479,7 @@ Design decisions, including dead ends and the reasons for the pinned versions, a
 
 ## License and credits
 
-subfix is released under the **MIT License**.
+subfix is released under the [MIT License](LICENSE).
 
 It builds on:
 

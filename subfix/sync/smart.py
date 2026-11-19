@@ -12,10 +12,15 @@ Pipeline
    per token) aligns the remaining words.
 4. **Per-line offset**: start of the first matched word, minus the expected time to speak the
    characters before it → ``δ_line = true_start − subtitle_start``.
-5. **Robust smoothing**: a running median of δ over neighbouring matched lines removes Whisper
-   word-timing noise and bad matches while keeping step changes (cuts) sharp.
-6. **Unmatched lines** take the offset of the previous or next matched line (whichever overlaps
-   detected speech better), or a time interpolation if both agree.
+5. **Drift slope**: chosen among {0, frame-rate-conversion slopes, local-pair estimate} by the
+   total variation of the smoothed, detrended offsets (cuts can't fake a drift).
+6. **Fusion**: one Viterbi pass over cues × candidate offsets (as in piecewise sync) whose
+   emission is VAD speech overlap *plus* a capped penalty for disagreeing with the
+   Whisper-derived offset of matched lines. Text decides *which* section a cue belongs to; the
+   audio pins the exact position and covers sections Whisper didn't transcribe. Within a
+   section the human-authored relative timing is preserved.
+
+Without a speech signal, step 6 falls back to a running median over the text offsets.
 
 If too few lines match (e.g. subtitles in another language than the audio), the caller falls
 back to audio-only sync.
@@ -37,7 +42,7 @@ from ..log import log
 from ..srt_io import Subtitle
 from ..transcribe import Transcript
 from ..vad import SpeechSignal
-from .common import RATE, SyncResult, alignment_score, dialogue, reference_signal
+from .common import RATE, SyncResult, alignment_score, dialogue, is_dialogue, reference_signal
 
 _TAG = re.compile(r"<[^>]*>|\{[^}]*\}")
 _SOUND = re.compile(r"\[[^\]]*\]|\([^)]*\)|♪[^♪]*♪?")
@@ -287,10 +292,107 @@ def local_slope(t: np.ndarray, d: np.ndarray, span: int = 20, min_dt: float = 15
     return b if abs(b) < 0.3 else 0.0
 
 
+def choose_slope(t: np.ndarray, d: np.ndarray, k: int) -> float:
+    """Pick the drift slope that leaves the per-line offsets most piecewise-flat.
+
+    Candidates: 0, the slopes of real frame-rate conversions and the local-pair estimate.
+    With few matched lines (a short film, many cuts) the local estimate alone can be badly
+    biased by pairs straddling cuts; scoring candidates by the total variation of the smoothed,
+    detrended residual and requiring a clear gain over "no drift" fixes that.
+    """
+    from .drift import candidate_scales
+
+    cands = {0.0, local_slope(t, d)} | {s - 1.0 for s in candidate_scales() if s != 1.0}
+
+    def cost(b: float) -> float:
+        # total variation of the smoothed residual: a piecewise-constant signal costs only its
+        # step sizes, a left-over ramp costs its whole rise
+        e = d - b * t
+        return float(np.abs(np.diff(running_median(e, k))).sum())
+
+    base = cost(0.0)
+    best_b, best_c = 0.0, base
+    for b in cands:
+        c = cost(b)
+        if c < best_c:
+            best_b, best_c = b, c
+    return best_b if best_c < 0.8 * base else 0.0
+
+
 def line_emission(sub: Subtitle, offset: float, ref: np.ndarray) -> float:
     a = max(0, int((sub.start + offset) * RATE))
     b = min(len(ref), int((sub.end + offset) * RATE))
     return float(ref[a:b].sum()) if b > a else -1e9
+
+
+def _smoothed_offsets(
+    subs: Sequence[Subtitle], raw: np.ndarray, matched: np.ndarray, b: float, k: int
+) -> np.ndarray:
+    """Text-only per-line offsets (no audio): detrend, running median, fill unmatched lines."""
+    t_m = np.array([subs[i].start for i in matched])
+    trend = b * t_m
+    smooth = trend + running_median(raw[matched] - trend, k)
+    offsets = np.full(len(subs), np.nan)
+    offsets[matched] = smooth
+    for ln in range(len(subs)):
+        if not np.isnan(offsets[ln]):
+            continue
+        q = np.searchsorted(matched, ln)
+        prev_ln = matched[q - 1] if q > 0 else None
+        next_ln = matched[q] if q < len(matched) else None
+        if prev_ln is None or next_ln is None:
+            offsets[ln] = offsets[prev_ln if next_ln is None else next_ln]
+            continue
+        op, on = offsets[prev_ln], offsets[next_ln]
+        expected = b * (subs[next_ln].start - subs[prev_ln].start)
+        if abs((on - op) - expected) < 0.3:
+            tp, tn = subs[prev_ln].start, subs[next_ln].start
+            w = (subs[ln].start - tp) / (tn - tp) if tn > tp else 0.5
+            offsets[ln] = op + w * (on - op)
+        else:
+            near_prev = subs[ln].start - subs[prev_ln].end < subs[next_ln].start - subs[ln].end
+            offsets[ln] = op if near_prev else on
+    return offsets
+
+
+def fused_offsets(
+    subs: Sequence[Subtitle],
+    raw: np.ndarray,
+    b: float,
+    speech: SpeechSignal,
+    text_weight: float = 2.0,
+    max_offset: float = 900.0,
+    split_penalty_s: float = 6.0,
+) -> np.ndarray:
+    """Fuse text and audio evidence in one Viterbi pass (see module docstring, step 5).
+
+    After removing the drift slope ``b``, each cue gets one offset from a candidate set; the
+    emission is the VAD overlap (as in audio-only piecewise sync) plus, for cues matched to
+    the transcript, a penalty growing with the distance to the Whisper-derived offset (capped,
+    so a single wrong match cannot dominate). Candidates = clusters of the text offsets ∪
+    audio correlation peaks, so sections whose dialogue Whisper missed are still found.
+    """
+    from .piecewise import _expand, candidate_offsets, signal_strength, viterbi_offsets
+
+    ref = reference_signal(speech)
+    strength = signal_strength(ref)
+    scale = 1.0 + b
+    scaled = [Subtitle(s.start * scale, s.end * scale, s.text) for s in subs]
+    resid = raw - b * np.array([s.start for s in subs])  # offset left after drift removal
+    ok = ~np.isnan(resid)
+
+    centres = sorted({round(float(x), 1) for x in resid[ok]})
+    centres += candidate_offsets(dialogue(scaled), ref, max_offset)
+    grid = _expand(centres, radius=0.6)
+    offs_s = grid / RATE
+    dev = np.abs(offs_s[None, :] - np.where(ok, resid, 0.0)[:, None])
+    extra = -text_weight * strength * RATE * np.minimum(dev, 3.0)
+    extra[~ok] = 0.0
+    weights = np.array([1.0 if is_dialogue(s) else 0.2 for s in scaled])
+    chosen = viterbi_offsets(
+        scaled, ref, grid, split_penalty_s * RATE * strength, weights, extra=extra
+    )
+    return np.array([s.start * b for s in subs]) + chosen / RATE
 
 
 def sync_smart(
@@ -299,6 +401,7 @@ def sync_smart(
     speech: SpeechSignal | None = None,
     smooth_lines: int = 4,
     min_match_ratio: float = 0.25,
+    text_weight: float = 2.0,
 ) -> SyncResult:
     """Re-time ``subs`` using the word timings of ``transcript``.
 
@@ -346,45 +449,19 @@ def sync_smart(
         )
 
     # Model: global drift (slope) + piecewise-constant offsets (cuts) + Whisper noise.
-    # The slope is the median of slopes between *nearby* matched lines, so the few pairs that
-    # straddle a cut cannot bias it. After detrending, δ is piecewise flat and a running median
-    # removes noise/outliers while keeping the steps sharp.
     t_m = np.array([subs[i].start for i in matched])
-    b = local_slope(t_m, raw[matched])
-    trend = b * t_m
-    smooth = trend + running_median(raw[matched] - trend, smooth_lines)
-    # reject lines whose own estimate disagrees strongly with their neighbourhood
-    offsets = np.full(n_lines, np.nan)
-    offsets[matched] = smooth
-
+    b_slope = choose_slope(t_m, raw[matched], smooth_lines)
+    if speech is not None:
+        offsets = fused_offsets(subs, raw, b_slope, speech, text_weight)
+    else:
+        offsets = _smoothed_offsets(subs, raw, matched, b_slope, smooth_lines)
     ref = reference_signal(speech) if speech is not None else None
-    mt = matched
-    for ln in range(n_lines):
-        if not np.isnan(offsets[ln]):
-            continue
-        k = np.searchsorted(mt, ln)
-        prev_ln = mt[k - 1] if k > 0 else None
-        next_ln = mt[k] if k < len(mt) else None
-        if prev_ln is None or next_ln is None:
-            offsets[ln] = offsets[prev_ln if next_ln is None else next_ln]
-            continue
-        op, on = offsets[prev_ln], offsets[next_ln]
-        expected = b * (subs[next_ln].start - subs[prev_ln].start)  # drift between neighbours
-        if abs((on - op) - expected) < 0.3:
-            tp, tn = subs[prev_ln].start, subs[next_ln].start
-            w = (subs[ln].start - tp) / (tn - tp) if tn > tp else 0.5
-            offsets[ln] = op + w * (on - op)
-        elif ref is not None:
-            offsets[ln] = max((op, on), key=lambda o: line_emission(subs[ln], o, ref))
-        else:
-            near_prev = subs[ln].start - subs[prev_ln].end < subs[next_ln].start - subs[ln].end
-            offsets[ln] = op if near_prev else on
 
     out = [Subtitle(s.start + o, s.end + o, s.text) for s, o in zip(subs, offsets, strict=True)]
     # remove overlaps introduced by different offsets of neighbouring lines
-    for a, b in zip(out, out[1:], strict=False):
-        if a.end > b.start - 0.02 and a.start < b.start:
-            a.end = max(a.start + 0.3, b.start - 0.02)
+    for cur, nxt in zip(out, out[1:], strict=False):
+        if cur.end > nxt.start - 0.02 and cur.start < nxt.start:
+            cur.end = max(cur.start + 0.3, nxt.start - 0.02)
 
     score = alignment_score(dialogue(out), ref) if ref is not None else float("nan")
     return SyncResult(
@@ -396,6 +473,7 @@ def sync_smart(
             "matched_lines": int(len(matched)),
             "total_lines": int(dlg_lines),
             "match_ratio": float(ratio),
-            "offset": float(np.median(smooth)),
+            "offset": float(np.median(offsets)),
+            "drift_scale": 1.0 + b_slope,
         },
     )

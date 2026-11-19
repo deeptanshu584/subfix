@@ -52,6 +52,34 @@ DATASETS = {
 }
 METHODS = ["offset", "drift", "piecewise", "smart"]
 
+GEN_SECTION_HEADER = [
+    "## Subtitle generation",
+    "",
+    "`benchmarks/generation_bench.py`: `subfix generate --no-cache` end to end (audio extraction,",
+    "VAD, model load, transcription), peak RSS of the whole process tree, WER of the generated",
+    "text",
+    "against the reference subtitles (normalised tokens). On Tears of Steel the reference is the",
+    "official subtitle text, which paraphrases and omits shouted lines, so WER there is an upper",
+    "bound on the real recognition error.",
+    "",
+]
+NOTES = [
+    "## How to read these numbers",
+    "",
+    "* **Synthetic films** have exact ground truth (the speech span of every TTS sentence). The",
+    "  ~20 ms floor is the VAD frame resolution (32 ms) plus onset latency.",
+    "* **Tears of Steel**: the reference is the official, human-timed subtitle file (times",
+    "  rounded to 0.5 s). Its cues sit ~0.1 s from where the audio puts the speech, so ~110 ms is",
+    "  the floor an audio-only method reaches against that reference, not an error.",
+    "* **DE subs on EN audio** cannot be aligned by text; `smart` detects the mismatch and falls",
+    "  back to audio-only sync, so its row equals `piecewise`.",
+    "* Tears of Steel repeats its opening dialogue in a later scene with the same rhythm, which",
+    "  makes audio-only piecewise sync ambiguous for some cut positions (DECISIONS.md D21); its",
+    "  loud climax is barely detected by VAD or Whisper, which bounds every method there.",
+    "* Time/run excludes the one-off transcription (cached); see the generation table for that.",
+    "",
+]
+
 
 def run(datasets: list[str], seeds: int) -> dict:
     setup_logging(quiet=True)
@@ -147,6 +175,12 @@ def aggregate(results: dict) -> dict:
     return out
 
 
+def model_label(g: dict) -> str:
+    if g["model"] != "default":
+        return g["model"]
+    return "large-v3-turbo int8_float16" if g["device"] == "cuda" else "small int8"
+
+
 def fmt_ms(x: float) -> str:
     if np.isnan(x):
         return "—"
@@ -195,6 +229,22 @@ def write_markdown(results: dict, path: Path) -> None:
                     f"{s['seconds']:.2f} s |"
                 )
         lines.append("")
+    lines += GEN_SECTION_HEADER
+    gen = ROOT / "generation_results.json"
+    if gen.is_file():
+        lines += [
+            "| Dataset | Device | Model | Audio | Wall time | × real time | Peak RAM | WER |",
+            "|---|---|---|---:|---:|---:|---:|---:|",
+        ]
+        for g in json.loads(gen.read_text()):
+            label = DATASETS[g["dataset"]][2] if g["dataset"] in DATASETS else g["dataset"]
+            lines.append(
+                f"| {label} | {g['device']} | {model_label(g)} | {g['audio_min']:.1f} min | "
+                f"{g['wall_s']:.0f} s | {g['x_realtime']:.1f}× | "
+                f"{g['peak_rss_mb'] / 1024:.1f} GB | {g['wer']:.1%} |"
+            )
+        lines.append("")
+    lines += NOTES
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -203,11 +253,17 @@ def main() -> None:
     ap.add_argument("--seeds", type=int, default=5)
     ap.add_argument("--datasets", default="synth_short,synth_long,tos,tos_de")
     ap.add_argument("--out", type=Path, default=ROOT / "results.json")
+    ap.add_argument(
+        "--report-only", action="store_true", help="Rebuild RESULTS.md from --out JSON."
+    )
     a = ap.parse_args()
-    results = run(a.datasets.split(","), a.seeds)
-    a.out.write_text(json.dumps(results), encoding="utf-8")
+    if a.report_only:
+        results = json.loads(a.out.read_text(encoding="utf-8"))
+    else:
+        results = run(a.datasets.split(","), a.seeds)
+        a.out.write_text(json.dumps(results), encoding="utf-8")
     write_markdown(results, ROOT / "RESULTS.md")
-    print(f"wrote {a.out} and {ROOT / 'RESULTS.md'}")
+    print(f"wrote {ROOT / 'RESULTS.md'}" + ("" if a.report_only else f" and {a.out}"))
 
 
 if __name__ == "__main__":

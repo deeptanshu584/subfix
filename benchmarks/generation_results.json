@@ -1,0 +1,46 @@
+[
+ {
+  "dataset": "synth_short",
+  "device": "cuda",
+  "model": "default",
+  "audio_min": 12.001066666666667,
+  "wall_s": 17.716560599999866,
+  "x_realtime": 40.6435547089205,
+  "peak_rss_mb": 1902.5078125,
+  "wer": 0.023986765922249794,
+  "ref_words": 1209
+ },
+ {
+  "dataset": "synth_long",
+  "device": "cuda",
+  "model": "default",
+  "audio_min": 100.00106666666667,
+  "wall_s": 78.73362540000016,
+  "x_realtime": 76.20713474728407,
+  "peak_rss_mb": 2116.39453125,
+  "wer": 0.021237032687414368,
+  "ref_words": 10218
+ },
+ {
+  "dataset": "tos",
+  "device": "cuda",
+  "model": "default",
+  "audio_min": 12.236111116666667,
+  "wall_s": 11.579037799999696,
+  "x_realtime": 63.40480786754312,
+  "peak_rss_mb": 2209.83203125,
+  "wer": 0.3592814371257485,
+  "ref_words": 334
+ },
+ {
+  "dataset": "synth_short",
+  "device": "cpu",
+  "model": "default",
+  "audio_min": 12.001066666666667,
+  "wall_s": 59.080304799999794,
+  "x_realtime": 12.187885665749011,
+  "peak_rss_mb": 1838.75390625,
+  "wer": 0.030603804797353185,
+  "ref_words": 1209
+ }
+]

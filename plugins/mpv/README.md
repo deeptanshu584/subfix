@@ -113,3 +113,17 @@ VLC supports Lua extensions (`%APPDATA%\vlc\lua\extensions\subfix.lua`). They ap
 The problem is that VLC extensions have no asynchronous subprocess API. `io.popen` blocks the extension, and often the VLC interface, until subfix exits, which can take minutes. It also needs a shell command string, so quoting paths with special characters is fragile, and on Windows it briefly opens a console window.
 
 A workable alternative is a small **watcher**. A separate process, such as a Python script or `subfix watch` if that command is ever added, does the long-running work. The VLC extension then only starts that process without waiting for it (for example `start "" /b …` through `os.execute`) and polls for `<video>.synced.srt` or `<video>.generated.srt` from a VLC dialog button or timer. When the file appears, it calls `vlc.input.add_subtitle`. VLC's own UI stays responsive because the extension never waits on the subprocess.
+
+## Testing the plugin without a screen
+
+`tests/headless_test.lua` loads a file, sends a real `Ctrl+S` keypress to the plugin and exits
+with code 0 once a subtitle track titled `subfix` has been loaded (3 on a 5-minute timeout):
+
+```powershell
+mpv.com --no-config --vo=null --ao=null --pause `
+  --script=plugins\mpv\subfix.lua --script=plugins\mpv\tests\headless_test.lua `
+  path\to\movie.mkv
+```
+
+This was run against mpv 0.42 on Windows 11 with a synthetic film and with Tears of Steel
+(corrupted sidecar `.srt` → `*.synced.srt` loaded and selected).

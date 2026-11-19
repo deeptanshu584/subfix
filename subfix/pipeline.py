@@ -52,10 +52,11 @@ class Context:
         choice = choice or default_choice(task)
         key = (task, language, choice)
         if key not in self._transcripts:
+            audio, speech = self.audio, self.speech  # extract + VAD first (ordered status)
             emit_status("transcribing" if task == "transcribe" else "translating")
             self._transcripts[key] = transcribe(
-                self.audio,
-                self.speech,
+                audio,
+                speech,
                 choice=choice,
                 task=task,
                 language=language,

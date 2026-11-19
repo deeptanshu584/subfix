@@ -48,7 +48,7 @@ def candidate_offsets(
     max_offset: float,
     window: float = 90.0,
     step: float = 30.0,
-    peaks_per_window: int = 3,
+    peaks_per_window: int = 6,
     rate: int = RATE,
 ) -> list[float]:
     """Coarse offset candidates from the strongest correlation peaks of sliding windows."""
@@ -90,8 +90,13 @@ def viterbi_offsets(
     weights: np.ndarray | None = None,
     rate: int = RATE,
     overlap_tolerance: float = 0.5,
+    extra: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Return the best offset (in frames) for every cue. ``offsets_frames`` must be sorted."""
+    """Return the best offset (in frames) for every cue. ``offsets_frames`` must be sorted.
+
+    ``extra`` (shape ``(n_cues, n_offsets)``) is added to the VAD emission — smart sync uses it
+    to inject text-alignment evidence.
+    """
     n, k = len(subs), len(offsets_frames)
     starts = np.array([s.start for s in subs])
     ends = np.array([s.end for s in subs])
@@ -107,6 +112,8 @@ def viterbi_offsets(
     emis = csum[b_idx] - csum[a_idx]  # (n, k)
     if weights is not None:
         emis *= weights[:, None]
+    if extra is not None:
+        emis = emis + extra
 
     back = np.zeros((n, k), dtype=np.int32)
     v = emis[0].copy()
@@ -132,6 +139,12 @@ def viterbi_offsets(
     for i in range(n - 1, 0, -1):
         path[i - 1] = back[i, path[i]]
     return offsets_frames[path]
+
+
+def signal_strength(ref: np.ndarray) -> float:
+    """Typical per-frame value of clear speech in this film's reference signal."""
+    pos = ref[ref > 0]
+    return float(pos.mean()) if len(pos) else 0.5
 
 
 def _segments(offs: np.ndarray, subs: Sequence[Subtitle]) -> list[tuple[int, int, float]]:
@@ -166,8 +179,7 @@ def sync_piecewise(
     weights = np.array([1.0 if is_dialogue(s) else 0.2 for s in subs])
     # Express the penalty in "seconds of well-aligned speech" for *this* film: a frame of clear
     # speech is worth ~0.5 on clean audio but only ~0.2 under a loud score.
-    pos = ref[ref > 0]
-    strength = float(pos.mean()) if len(pos) else 0.5
+    strength = signal_strength(ref)
     offs = viterbi_offsets(subs, ref, grid, split_penalty_s * RATE * strength, weights)
     segs = _segments(offs, subs)
     out = [

@@ -94,3 +94,35 @@ channels → correlation with the clean speech 0.95 vs 0.31 for a plain downmix.
 **D18. auto mode = smart on GPU, audio-only (drift + piecewise) on CPU.** Smart falls back to
 alignment against Whisper's English translation when the subtitles look English but the audio
 isn't, then to audio-only sync.
+
+## Phase 6 — benchmark-driven iteration
+
+**D19. Real film exposed two smart-sync failure modes** (first full benchmark, Tears of Steel,
+piecewise corruption: 42 % of lines within 200 ms, drift: 82 %):
+1. With few matched lines (47) the local-pair drift slope was biased by pairs straddling cuts
+   and bent whole sections by seconds. Fix: choose the slope among {0, fps-ratio slopes, local
+   estimate} by **total variation** of the smoothed detrended offsets (a ramp costs its full
+   rise, steps only their size). A "flatness vs. own running median" criterion was tried first
+   and failed — a running median follows a linear ramp, so drift looked flat too.
+2. Sections whose dialogue Whisper never transcribed (ToS climax: screaming over the score)
+   inherited the last matched offset (23 s wrong). Fix: **fuse** text and audio — the final
+   assignment is the piecewise Viterbi with an extra emission term pulling matched cues toward
+   their Whisper offsets (capped at 3 s so one bad match can't dominate), and candidates from
+   both text offsets and audio correlation peaks.
+Before: 23.7 % / 13.8 % / 35.5 % of lines within 200 ms on ToS piecewise seeds 1/3/4 (first
+benchmark run). Lines off by > 0.3 s on those seeds: 13/13/18 after the slope fix → 2/3/12
+after fusion (out of 76; the remaining ones are the untranscribed climax section).
+Side effect: smart output keeps the human-authored relative timing within each section, which
+matches how real out-of-sync files are broken (they were correct for another release).
+
+**D20. `--translate` verified** on a German LibriVox recording (Grimm, public domain): large-v3
+int8_float16, 91 s of audio in 20.7 s, peak RSS 3.3 GB; fluent English output.
+
+**D21. Piecewise candidates: 6 correlation peaks per window (was 3).** On Tears of Steel the
+film *repeats its opening dialogue* in a later scene with the same rhythm, so for a 41-cue
+section the audio correlation 5 minutes away (0.141) beats the true offset (0.062) and the
+true offset never made the top-3 list. The no-reorder constraint already rejects the
+impossible placement; it just needs the right candidate to exist. ToS piecewise (audio-only):
+76.2 % → 84.8 % within 200 ms; synthetic unchanged. 10 peaks: no further gain, 2.6× slower on
+the 100-min film. Lowering the split penalty (1.5–6 s) made no difference — it was a
+candidate problem, not a penalty problem.
