@@ -120,7 +120,7 @@ def format_timestamp(seconds: float, sep: str = ",") -> str:
 
 # --------------------------------------------------------------------------- parsers
 
-_VTT_TAG = re.compile(r"</?(?!(?:i|b|u)>)[^>]*>")
+_VTT_TAG = re.compile(r"<(?!/?(?:i|b|u)>)[^>]*>")
 
 
 def _parse_cues(text: str, vtt: bool) -> list[Subtitle]:

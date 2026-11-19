@@ -118,6 +118,87 @@ def generate(
 
 
 @app.command()
+def sync(
+    video: Annotated[Path, typer.Argument(help="Video or audio file (the timing reference).")],
+    subs: Annotated[
+        Path | None,
+        typer.Argument(help="Out-of-sync subtitle file (.srt/.vtt/.ass). Default: next to video."),
+    ] = None,
+    mode: Annotated[
+        Mode,
+        typer.Option("--mode", help="auto = smart on GPU, else audio (drift + piecewise)."),
+    ] = Mode.auto,
+    lang: LangOpt = None,
+    model: ModelOpt = None,
+    device: DeviceOpt = "auto",
+    compute_type: ComputeOpt = None,
+    output: OutOpt = None,
+    audio_track: TrackOpt = 0,
+    no_cache: NoCacheOpt = False,
+    verbose: VerboseOpt = False,
+    quiet: QuietOpt = False,
+    status: StatusOpt = False,
+) -> None:
+    """Fix the timing of existing subtitles → [bold]VIDEO.synced.srt[/]."""
+    setup_logging(verbose, quiet, status)
+    _check_media(video)
+    from .pipeline import Context
+    from .pipeline import sync as do_sync
+    from .srt_io import find_sidecar
+
+    subs = subs or find_sidecar(video)
+    if subs is None:
+        console.print(f"[red]error:[/] no subtitle file given and none found next to {video.name}")
+        raise typer.Exit(2)
+    ctx = Context(video, audio_track, use_cache=not no_cache)
+    path, _, _ = do_sync(
+        ctx, subs, mode.value, _choice(model, device, compute_type, "transcribe"), lang, output
+    )
+    print(f"SUBFIX-OUTPUT: {path}", flush=True)
+
+
+@app.command()
+def auto(
+    video: Annotated[Path, typer.Argument(help="Video or audio file.")],
+    subs: Annotated[
+        Path | None, typer.Option("--subs", "-s", help="Use this subtitle file.")
+    ] = None,
+    mode: Annotated[Mode, typer.Option("--mode", help="Sync mode if subtitles exist.")] = Mode.auto,
+    generate_: Annotated[
+        bool, typer.Option("--generate", "-g", help="Always generate, even if subtitles exist.")
+    ] = False,
+    lang: LangOpt = None,
+    translate: Annotated[
+        bool, typer.Option("--translate", "-t", help="When generating: English subtitles.")
+    ] = False,
+    model: ModelOpt = None,
+    device: DeviceOpt = "auto",
+    compute_type: ComputeOpt = None,
+    output: OutOpt = None,
+    audio_track: TrackOpt = 0,
+    no_cache: NoCacheOpt = False,
+    verbose: VerboseOpt = False,
+    quiet: QuietOpt = False,
+    status: StatusOpt = False,
+) -> None:
+    """[default] Sync subtitles next to VIDEO if present, otherwise generate them."""
+    setup_logging(verbose, quiet, status)
+    _check_media(video)
+    from .pipeline import Context
+    from .pipeline import auto as do_auto
+    from .pipeline import generate as do_generate
+
+    ctx = Context(video, audio_track, use_cache=not no_cache)
+    task = "translate" if translate else "transcribe"
+    choice = _choice(model, device, compute_type, task)
+    if generate_:
+        path = do_generate(ctx, task, lang, choice, output)[0]
+    else:
+        path = do_auto(ctx, subs, mode.value, choice, lang, translate, output)
+    print(f"SUBFIX-OUTPUT: {path}", flush=True)
+
+
+@app.command()
 def info(verbose: VerboseOpt = False) -> None:
     """Show detected GPU/CPU, default models and cache location."""
     setup_logging(verbose)
@@ -155,11 +236,31 @@ def main() -> None:
     argv = sys.argv[1:]
     if argv and argv[0] not in COMMANDS and not argv[0].startswith("-"):
         sys.argv.insert(1, "auto")
+    from .audio import AudioError
+    from .srt_io import SubtitleError
+
     try:
         app()
     except KeyboardInterrupt:
         console.print("[yellow]Interrupted.[/]")
         sys.exit(130)
+    except (
+        AudioError,
+        SubtitleError,
+        RuntimeError,
+        ValueError,
+        PermissionError,
+        FileNotFoundError,
+    ) as exc:
+        if "-v" in argv or "--verbose" in argv:
+            raise
+        console.print(f"[red]error:[/] {exc}")
+        console.print("[dim]Run again with -v for details.[/]")
+        print(
+            f"SUBFIX-ERROR: {str(exc).splitlines()[0] if str(exc) else type(exc).__name__}",
+            flush=True,
+        )
+        sys.exit(1)
 
 
 if __name__ == "__main__":
