@@ -54,3 +54,6 @@ ignore = ["RUF001", "RUF002", "RUF003", "RUF007", "RUF046", "SIM105"]
 testpaths = ["tests"]
 addopts = "-q"
 markers = ["gpu: tests that need a CUDA GPU and downloaded models", "slow: slow tests"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]
