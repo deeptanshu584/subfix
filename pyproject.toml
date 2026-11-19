@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "subfix"
+version = "0.1.0"
+description = "Generate subtitles with Whisper and fix out-of-sync subtitles (offset, drift, piecewise, text-aware smart sync)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "subfix contributors" }]
+keywords = ["subtitles", "whisper", "srt", "sync", "vad", "mpv"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Environment :: Console",
+    "Topic :: Multimedia :: Video",
+]
+# Pinned to the exact versions verified on the development machine (see SYSTEM_REPORT.md).
+dependencies = [
+    "faster-whisper==1.2.1",
+    "ctranslate2==4.9.0",
+    "av==15.1.0",                 # faster-whisper 1.2.1 passes `metadata_errors`, removed in av>=16
+    "onnxruntime==1.32.0",        # Silero VAD (bundled with faster-whisper) runs on onnxruntime
+    "numpy==2.5.5",
+    "typer==0.29.2",
+    "rich==15.0.0",
+    "rapidfuzz==3.14.6",
+    "pysubs2==1.9.1",
+    "charset-normalizer==3.5.2",
+]
+
+[project.optional-dependencies]
+# CUDA 12 cuBLAS for CTranslate2 on Windows/Linux. cuDNN 9 is bundled in the ctranslate2 wheel on
+# Windows; on Linux also add nvidia-cudnn-cu12==9.*.
+gpu = ["nvidia-cublas-cu12==12.4.5.8"]
+dev = ["pytest==9.2.0", "ruff==0.17.6"]
+
+[project.scripts]
+subfix = "subfix.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["subfix*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = ["gpu: tests that need a CUDA GPU and downloaded models", "slow: slow tests"]
