@@ -101,6 +101,15 @@ def media_duration(path: Path) -> float:
         return 0.0
 
 
+_CENTER_LAYOUTS = ("3.0", "3.1", "4.0", "4.1", "5.0", "5.1", "6.1", "7.0", "7.1")
+
+
+def has_center_channel(stream: dict) -> bool:
+    """True if an ffprobe audio stream has a front-centre (dialogue) channel, e.g. 5.1."""
+    layout = str(stream.get("channel_layout", ""))
+    return layout.startswith(_CENTER_LAYOUTS) or (not layout and stream.get("channels", 0) >= 6)
+
+
 def file_fingerprint(path: Path, extra: str = "") -> str:
     """Cheap, stable cache key: absolute path + size + mtime + first/last 64 KiB."""
     path = Path(path).resolve()
@@ -128,8 +137,20 @@ def extract_audio(
     media = Path(media)
     if not media.is_file():
         raise AudioError(f"File not found: {media}")
+    streams = audio_streams(media)
+    if not streams:
+        raise AudioError(f"{media.name} has no audio track")
+    if audio_track >= len(streams):
+        raise AudioError(
+            f"{media.name} has {len(streams)} audio track(s); --audio-track {audio_track} "
+            f"does not exist (tracks are numbered from 0)"
+        )
+    # Surround mixes put dialogue on the centre channel: mostly-centre audio gives VAD and
+    # Whisper far less music/effects to fight with than a plain downmix.
+    center = has_center_channel(streams[audio_track])
+    mix = ["-af", "pan=mono|c0=0.8*FC+0.1*FL+0.1*FR"] if center else ["-ac", "1"]
     if out_path is None:
-        key = file_fingerprint(media, extra=f"a{audio_track}")
+        key = file_fingerprint(media, extra=f"a{audio_track}" + ("|fc" if center else ""))
         out_path = cache_dir("audio") / f"{media.stem[:40]}.{key}.wav"
     if out_path.is_file() and not force:
         log.debug("audio cache hit: %s", out_path)
@@ -152,8 +173,7 @@ def extract_audio(
         "-vn",
         "-sn",
         "-dn",
-        "-ac",
-        "1",
+        *mix,
         "-ar",
         str(SAMPLE_RATE),
         "-c:a",
@@ -163,7 +183,11 @@ def extract_audio(
         "-nostats",
         str(tmp),
     ]
-    log.info("Extracting audio from [bold]%s[/] ...", media.name)
+    log.info(
+        "Extracting audio from [bold]%s[/]%s ...",
+        media.name,
+        " (centre/dialogue channel)" if center else "",
+    )
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,

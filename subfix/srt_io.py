@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import html
 import re
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field, replace
@@ -75,10 +76,11 @@ def decode_bytes(data: bytes) -> tuple[str, str]:
         return data[3:].decode("utf-8", errors="replace"), "utf-8-sig"
     if data.startswith((b"\xff\xfe", b"\xfe\xff")):
         return data.decode("utf-16", errors="replace"), "utf-16"
-    # UTF-16 without BOM: lots of NUL bytes in alternating positions.
-    if len(data) > 64 and data[1:200:2].count(0) > 40:
+    # UTF-16 without BOM: NUL bytes in most odd (LE) or even (BE) positions of Latin text.
+    odd, even = data[1:200:2], data[:200:2]
+    if len(data) >= 16 and odd.count(0) > 0.4 * len(odd):
         return data.decode("utf-16-le", errors="replace"), "utf-16-le"
-    if data[:200:2].count(0) > 40 and len(data) > 64:
+    if len(data) >= 16 and even.count(0) > 0.4 * len(even):
         return data.decode("utf-16-be", errors="replace"), "utf-16-be"
     try:
         return data.decode("utf-8"), "utf-8"
@@ -153,7 +155,7 @@ def _parse_cues(text: str, vtt: bool) -> list[Subtitle]:
             )
             if cut is not None:
                 body = body[: cut - 1]
-            body = [_VTT_TAG.sub("", ln) for ln in body]
+            body = [html.unescape(_VTT_TAG.sub("", ln)) for ln in body]
         cue_text = "\n".join(ln.rstrip() for ln in body).strip("\n")
         if not cue_text.strip():
             continue
@@ -175,7 +177,13 @@ def parse_ass(text: str) -> list[Subtitle]:
     """Parse ASS/SSA text via pysubs2."""
     import pysubs2
 
-    doc = pysubs2.SSAFile.from_string(text)
+    # Pass the format explicitly: pysubs2's auto-detection needs a styles section, which
+    # minimal real-world files omit.
+    fmt = "ssa" if "[V4 Styles]" in text else "ass"
+    try:
+        doc = pysubs2.SSAFile.from_string(text, format_=fmt)
+    except Exception as exc:
+        raise SubtitleError(f"Could not parse ASS/SSA subtitles: {exc}") from exc
     out: list[Subtitle] = []
     for ev in doc.events:
         if ev.is_comment:

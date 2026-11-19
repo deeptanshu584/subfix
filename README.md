@@ -1,0 +1,470 @@
+# subfix
+
+**subfix** is a command-line tool that does two things with a video file. It **generates
+subtitles** from the audio with [faster-whisper](https://github.com/SYSTRAN/faster-whisper),
+either transcribing the original language or translating to English. It also **fixes subtitles
+that are out of sync**: a constant offset, frame-rate drift (25 vs 23.976 fps), different offsets
+in different parts of the film (cuts, ads, extended scenes), and a "smart" text-aware mode that
+keeps the human-written subtitle text but takes its timing from what Whisper actually heard.
+subfix never overwrites your files. Results go next to the video as `movie.synced.srt` or
+`movie.generated.srt`.
+
+It is built for an ordinary laptop. The development machine has an RTX 4050 with 6 GB of VRAM,
+16 GB of RAM and runs Windows 11. A 3-hour film doesn't need more memory than a 10-minute clip.
+
+```text
+$ subfix movie.mkv
+Found subtitles: movie.srt → syncing
+…                                   (audio extraction, VAD, transcription progress)
+✓ smart: 114/114 lines matched to transcript (100%)  (speech overlap +0.07 → +0.71, 0.1s)
+Wrote movie.synced.srt
+```
+
+---
+
+## Contents
+
+- [Quick start](#quick-start)
+- [Install](#install)
+- [How it works](#how-it-works)
+- [Benchmarks](#benchmarks)
+- [mpv plugin](#mpv-plugin)
+- [Performance and memory](#performance-and-memory)
+- [Limitations](#limitations)
+- [Roadmap](#roadmap)
+- [Project layout](#project-layout)
+- [Development](#development)
+- [License and credits](#license-and-credits)
+
+---
+
+## Quick start
+
+```bash
+# Automatic: sync the subtitle file next to the video, or generate one if there is none
+subfix movie.mkv
+
+# Generate subtitles. --lang is the spoken language; --translate produces English subtitles
+subfix generate movie.mkv --lang fr --translate
+
+# Sync a specific subtitle file with a specific algorithm
+subfix sync movie.mkv movie.srt --mode drift
+
+# Show the GPU, the default models, the ffmpeg location and the cache directory
+subfix info
+```
+
+| Command | What it does | Output |
+| --- | --- | --- |
+| `subfix MOVIE` (same as `subfix auto MOVIE`) | Syncs a sidecar subtitle if one exists, otherwise generates | `MOVIE.synced.srt` or `MOVIE.generated.srt` |
+| `subfix generate MOVIE` | Whisper transcription (`--translate` for English) | `MOVIE.generated.srt` |
+| `subfix sync MOVIE [SUBS]` | Re-times an existing subtitle file | `MOVIE.synced.srt` |
+| `subfix info` | Environment check | none |
+
+Useful options (run `subfix <command> --help` for the full list):
+
+- `--mode auto|offset|drift|piecewise|smart` picks the sync algorithm. `auto` uses smart sync
+  on a GPU and audio-only sync on a CPU.
+- `--model`, `--device auto|cuda|cpu`, `--compute-type` override the Whisper configuration.
+- `--audio-track N` picks the audio track (0 = first). `-o/--output` sets the output path.
+- `--no-cache` recomputes audio, VAD and the transcript instead of reusing them.
+- `-v` turns on debug logging. `-q` hides everything except warnings and errors.
+
+**Finding the sidecar file.** subfix first looks for `movie.srt`, `.vtt`, `.ass` or `.ssa`
+with the same name as the video. If there is none, it looks for `movie.<lang>.srt`-style
+variants, preferring English and SRT. It ignores its own `.synced` and `.generated` outputs.
+It reads SRT, WebVTT and ASS/SSA in any common encoding and always writes UTF-8 SRT.
+
+**Reading the output line.** The summary names the method and its parameters. The
+formats are `offset +X s`, `scale S, offset +X s`, `N segment(s): +a s, +b s, …`, and
+`M/N lines matched to transcript` for smart sync. *Speech overlap* is the mean speech score
+under the subtitle cues before and after the fix (defined [below](#offset)). Higher means more
+cues sit on actual speech. If the score gets worse, subfix prints a warning: the subtitles were
+probably already in sync, or they belong to a different cut of the film.
+
+---
+
+## Install
+
+subfix needs Python 3.10 or newer (developed on 3.13) and ffmpeg. You don't need PyTorch:
+Silero VAD runs through the ONNX model bundled with faster-whisper.
+
+### Windows + NVIDIA GPU (the tested setup)
+
+```powershell
+winget install --id Gyan.FFmpeg.Essentials -e
+
+git clone {{REPO_URL}} subfix
+cd subfix
+py -3.13 -m venv .venv
+.venv\Scripts\activate
+pip install -e ".[gpu,dev]"
+
+subfix info        # should report "CUDA: available to CTranslate2"
+```
+
+- The `gpu` extra installs `nvidia-cublas-cu12==12.4.5.8`. cuDNN is already bundled in the
+  CTranslate2 wheel on Windows, so you don't need a separate CUDA Toolkit install. subfix adds
+  the pip-installed DLL folders to the search path itself.
+- If ffmpeg isn't on `PATH`, subfix also checks the WinGet links folder. You can also point
+  `SUBFIX_FFMPEG` at the ffmpeg folder.
+
+**Default models** (chosen by `subfix info` / `device.py`):
+
+| Hardware | Transcribe | Translate (`--translate`) |
+| --- | --- | --- |
+| CUDA, ≥ 5 GB VRAM | `large-v3-turbo`, `int8_float16` | `large-v3`, `int8_float16` |
+| CUDA, 3.5–5 GB | `medium` | `medium` |
+| CUDA, less | `small` | `small` |
+| CPU | `small`, `int8` | `small`, `int8` |
+
+Translation uses `large-v3` because `large-v3-turbo` was fine-tuned without translation data and
+tends to transcribe instead of translate. If a model fails to load or to run its warm-up
+inference, subfix tries the next configuration in this order: other compute types → smaller
+model → CPU `int8`. It logs the reason each time.
+
+**First run.** The first run downloads the model, about 1.6 GB for `large-v3-turbo` and about
+3 GB for `large-v3`. Models, extracted audio, VAD signals and transcripts are cached in
+`$SUBFIX_HOME`. When you run from a source checkout, this defaults to `<repo>/.cache`.
+Otherwise it's the platform cache directory, for example `%LOCALAPPDATA%\subfix\Cache` on
+Windows. To keep the cache on another drive:
+
+```powershell
+setx SUBFIX_HOME D:\subfix-cache
+```
+
+> **Low disk space on C: / "out of memory" with free VRAM.** On Windows (WDDM), GPU memory
+> counts against the system *commit limit*. If C: is nearly full, the page file can't grow, and
+> `float16` or `large-v3` can fail with an out-of-memory error even though `nvidia-smi` shows
+> free VRAM. That's why `int8_float16` is the default. Freeing space on C:, moving the page file,
+> or closing browsers helps. See [SETUP.md](SETUP.md) for details.
+
+### CPU only
+
+```bash
+pip install -e ".[dev]"
+```
+
+subfix detects that CUDA is unavailable and uses `small` / `int8`. Generation runs at roughly
+0.3–0.5× real time. `auto` mode uses the fast audio-only sync on CPU, which doesn't need Whisper.
+Pass `--mode smart` to transcribe anyway.
+
+### Linux / macOS
+
+Linux and macOS haven't been tested. The code is portable, but there is no benchmark data for
+these platforms.
+
+- **Linux + NVIDIA:** run `pip install -e ".[gpu,dev]" "nvidia-cudnn-cu12==9.*"`. You may need
+  to add the pip-installed `nvidia/*/lib` folders to `LD_LIBRARY_PATH` (see the faster-whisper
+  docs). Install ffmpeg with your package manager.
+- **macOS:** run `brew install ffmpeg` and then `pip install -e ".[dev]"`. CTranslate2 has no
+  Metal backend, so it runs on the CPU.
+
+---
+
+## How it works
+
+```mermaid
+flowchart TD
+    V["movie.mkv"] --> FF["ffmpeg → 16 kHz mono int16 WAV<br/>(cached, read via numpy memmap)"]
+    FF --> VAD["Silero VAD (ONNX)<br/>speech probability every 32 ms (cached)"]
+    VAD --> Q{"subtitle file<br/>next to the video?"}
+
+    Q -- "yes → sync" --> M{"--mode"}
+    M --> OFF["offset<br/>FFT cross-correlation"]
+    M --> DR["drift<br/>scale + offset"]
+    M --> PW["piecewise<br/>Viterbi over cues × offsets<br/>(with/without drift)"]
+    M --> SM["smart<br/>text alignment to transcript"]
+    OFF & DR & PW & SM --> SOUT["movie.synced.srt"]
+
+    Q -- "no → generate" --> W["faster-whisper, batched on GPU<br/>~10-min chunks cut at silences"]
+    W --> WT["word timestamps<br/>(transcript cached as JSON)"]
+    WT --> CUE["cue builder<br/>≤ 2 lines × 42 chars, ≤ 6 s, split at pauses/punctuation"]
+    CUE --> GOUT["movie.generated.srt"]
+    WT -. "smart mode needs a transcript" .-> SM
+```
+
+The audio-only methods (offset, drift and piecewise) score a candidate timing in the same way.
+A subtitle shown while someone is speaking earns credit, and a subtitle shown over silence
+loses credit:
+
+```text
+score = Σ_t  sub(t) · (p_speech(t) − θ)
+```
+
+Here `sub(t)` is 1 while a cue is on screen, `p_speech` is the VAD probability, and both are
+sampled on a 10 ms grid. Sound descriptions (`[door slams]`, `♪ …`) and very long cues are left
+out of the estimate, but they are still shifted.
+
+### offset
+
+This mode applies one constant shift to the whole file. subfix cross-correlates the subtitle
+on/off signal with the reference `p − θ`, so every offset up to ±15 minutes is scored in a
+single FFT. `θ` is the film's own mean speech probability, an adaptive threshold. A fixed
+threshold of 0.5 doesn't work, because Silero often outputs only 0.1–0.4 for real dialogue under
+music while true non-speech sits near 0. Positions outside the audio are scored worse than
+silence, so cues can't be "parked" off the ends of the film. The peak is then refined below one
+frame by fitting a parabola through it and its two neighbours.
+
+### drift
+
+This mode solves `t' = scale · t + offset`, which is the error you get when subtitles timed for
+a 25 fps release are played against a 23.976 fps video. The candidate scales are 1.0, every
+ratio of the common frame rates (23.976 / 24 / 25 / 29.97 / 30), and one data-driven estimate.
+That estimate is a robust Theil–Sen line fitted through offsets measured in sliding windows.
+subfix finds the best offset for each candidate scale with the FFT method above, then refines
+the winning scale with a golden-section search.
+
+### piecewise
+
+This mode handles different offsets in different parts of the film, for example after a cut
+scene or an inserted ad break. Each cue `i` gets an offset `o_i` from a candidate set, and a
+Viterbi dynamic program maximises the total score minus a penalty for every change of offset.
+The candidates are the strongest cross-correlation peaks of short sliding windows, each expanded
+to a fine 10 ms neighbourhood. The split penalty is measured in *seconds of well-aligned
+speech* for this particular film, so it behaves the same on clean audio and under a loud score.
+A hard constraint keeps cues in their original order: a switch can't make a cue start before the
+previous one ends. With prefix sums and a prefix-max, each DP step costs O(K), so the whole run
+is O(N·K).
+
+```mermaid
+flowchart LR
+    subgraph sub["subtitle file (one timeline)"]
+        A1["cues 1–180"] --> A2["cues 181–420"] --> A3["cues 421–900"]
+    end
+    subgraph vid["video (scene added, ad removed)"]
+        B1["offset +1.2 s"] --> B2["offset +38.5 s"] --> B3["offset −4.0 s"]
+    end
+    A1 -. "Viterbi: same offset is free,<br/>switching costs a penalty" .-> B1
+    A2 -.-> B2
+    A3 -.-> B3
+```
+
+In practice, `--mode piecewise` (and `auto` on a CPU) runs `sync_audio` in `pipeline.py`. That
+function first fits a global drift. It then runs piecewise both with and without that drift
+correction and keeps the better result, with ties going to the simpler model. If the result is a
+single segment, it is reported as plain drift or offset.
+
+### smart
+
+This mode keeps the human-written subtitle text and takes its timing from Whisper:
+
+1. **Tokenize** both sides: lower-case the text, strip tags, sound descriptions and speaker
+   labels, and normalise spellings such as `mr → mister` and `gonna → going`.
+2. **Find anchors.** Word trigrams that are rare on both sides are matched. The longest chain
+   that is increasing on both sides (longest increasing subsequence) keeps only the
+   order-consistent matches. Text order isn't affected by timing errors, so this works the same
+   for offset, drift and cuts.
+3. **Fill the gaps.** Between anchors, a fuzzy Needleman–Wunsch alignment matches the remaining
+   words, using [rapidfuzz](https://github.com/rapidfuzz/RapidFuzz) similarity so it tolerates
+   small spelling differences.
+4. **Compute per-line offsets.** For each line, subfix takes the start of its first matched word
+   and moves it to the first VAD speech frame. Whisper's first word in a segment tends to start
+   100–400 ms early, in the silence before it. The time needed to speak any unmatched words
+   before that word is then subtracted.
+5. **Smooth.** subfix removes a local drift slope, then applies a running median over
+   neighbouring lines. This removes Whisper timing noise and bad matches while keeping real steps
+   (cuts) sharp.
+6. **Unmatched lines** are interpolated between their neighbours when the two agree. Otherwise
+   they take whichever neighbour's offset puts them on more detected speech.
+
+```mermaid
+flowchart LR
+    S["subtitle text"] --> T["tokenize +<br/>normalise"]
+    W["Whisper words<br/>+ timestamps"] --> T
+    T --> AN["rare-trigram anchors<br/>→ longest increasing chain"]
+    AN --> NW["fuzzy Needleman–Wunsch<br/>between anchors"]
+    NW --> OF["per-line offset<br/>(VAD-snapped onset)"]
+    OF --> SMO["detrend local slope<br/>+ running median"]
+    SMO --> UN["fill unmatched lines<br/>(interpolate / VAD choice)"]
+    UN --> O["movie.synced.srt"]
+```
+
+If too few lines match, subfix falls back in two steps. If the subtitles look English but the
+audio isn't English, it aligns against Whisper's English *translation* of the audio. Otherwise
+it falls back to audio-only sync and says so in its output.
+
+### auto
+
+`subfix sync --mode auto`, which is the default, uses **smart** sync when a CUDA GPU is
+available. Transcribing a film on a GPU takes minutes and gives the most accurate timing. On a
+CPU, it uses **audio-only** sync (drift + piecewise), which takes seconds and needs no Whisper
+model.
+
+### generate
+
+subfix splits the audio into ~10-minute chunks, placing each cut in the quietest point of the
+VAD signal near the boundary. Each chunk goes through faster-whisper's batched pipeline with
+word timestamps. Likely hallucinations are dropped, such as "Thanks for watching" on
+low-confidence segments and repetition loops. Words are then grouped into cues of at most 2
+lines × 42 characters and about 6 s each. A cue is broken at sentence punctuation or at a pause,
+and every cue stays on screen for at least about 0.8 s.
+
+---
+
+## Benchmarks
+
+> Full tables, per-run details and the commands to reproduce them are in
+> [benchmarks/RESULTS.md](benchmarks/RESULTS.md).
+
+**Test material.**
+
+- **Synthetic films** of 12 and 100 minutes. Sentences from *The Adventures of Sherlock Holmes*
+  (Project Gutenberg) are spoken by the Windows SAPI voices at random rates. The films include
+  random pauses, stretches of synthetic music, and a pink-noise floor throughout. The ground
+  truth is exact: every sentence's speech span is known to the millisecond.
+  ([`make_synthetic.py`](benchmarks/make_synthetic.py), [`tts.ps1`](benchmarks/tts.ps1))
+- **A real film:** *Tears of Steel* (Blender Foundation, CC-BY) with its official, human-timed
+  English subtitles as the reference.
+
+**Corruptions** ([`corrupt.py`](benchmarks/corrupt.py), deterministic seeds):
+
+- **offset:** a random shift of 1.5–45 s.
+- **drift:** a frame-rate ratio such as 25/23.976 or 24/25, plus a random offset.
+- **piecewise:** 2–4 sections with different offsets. When a section moves *earlier*, the
+  overlapping lines are removed, just as a real subtitle file has no lines for inserted footage.
+
+**Metrics:** mean and median absolute error of cue start times, and the percentage of lines
+within 200 ms of the truth.
+
+<!-- BENCH:TABLE -->
+
+Across the corpus, smart sync places **{{SMART_WITHIN200}}** of lines within 200 ms of the
+truth. Audio-only sync (drift + piecewise, no Whisper) places **{{AUDIO_WITHIN200}}** within
+200 ms. Subtitle generation with `large-v3-turbo` / `int8_float16` on the RTX 4050 runs at
+**{{GEN_SPEED}}**.
+
+---
+
+## mpv plugin
+
+A small Lua script for [mpv](https://mpv.io) runs subfix on the file you're watching. It
+syncs the sidecar subtitle, or generates one if there isn't any, and loads the result as soon as
+it's ready. The default key is **Ctrl+Shift+S**. The plugin calls the CLI with a hidden
+`--status` flag and reads the machine-readable `SUBFIX-STATUS:` / `SUBFIX-OUTPUT:` /
+`SUBFIX-ERROR:` lines it prints. See [plugins/mpv/README.md](plugins/mpv/README.md) for
+installation and options.
+
+---
+
+## Performance and memory
+
+- **Audio** is extracted once to a 16 kHz mono int16 WAV in the cache. A 3-hour film takes
+  ~345 MB. The WAV is read through `numpy.memmap` and never loaded fully into RAM.
+- **VAD** runs Silero over fixed 10-minute chunks of the memory-mapped audio. The resulting
+  probability signal (one float per 32 ms) is cached as `.npy`.
+- **Whisper** gets ~10-minute chunks cut at silences, batched on the GPU. Each chunk is freed
+  before the next one is read.
+- **Transcripts** are cached as JSON for each combination of audio, model, task and language.
+  Re-syncing the same film with a different subtitle file, or switching from `generate` to
+  `sync`, reuses the transcript and finishes in seconds.
+- **Sync** works on 10 ms grids with FFTs and prefix sums. The audio-only methods take seconds
+  even for long films.
+
+On the 100-minute synthetic film, a full run without a cache takes **{{LONG_FILM_TIME}}**. Peak
+resident memory, measured with [`benchmarks/peakmem.py`](benchmarks/peakmem.py), is
+**{{PEAK_RAM}}**.
+
+---
+
+## Limitations
+
+- **subfix needs speech.** Films with very little dialogue, or music videos, give the
+  algorithms little to work with.
+- **Language mismatch.** Smart sync needs the subtitles to be in the language that is spoken.
+  If the subtitles are English and the audio isn't, subfix aligns against Whisper's English
+  translation, which is looser and slower. For any other language pair, only audio-only sync
+  works, and it can't use the text at all.
+- **Loud music and effects** reduce Silero's speech probabilities. The adaptive threshold helps,
+  but audio-only sync is clearly less precise on films with heavy scores than on clean dialogue.
+- **One global drift.** Audio-only sync models a single scale plus piecewise offsets. Sections
+  with *different* frame-rate errors, or scenes that were reordered, aren't handled. Cues are
+  never reordered. Very short sections with only a few lines may get absorbed into their
+  neighbours rather than paying the split penalty.
+- **Translation uses `large-v3`,** which needs more VRAM and RAM and is slower than turbo. On a
+  memory-constrained Windows machine it may fall back to `medium`.
+- **Generated subtitles** have no speaker separation. Cue splitting follows simple heuristics,
+  and the hallucination filter is heuristic too.
+- **External subtitle files only.** Subtitle tracks embedded in an MKV aren't read yet. Only one
+  audio track is used per run (`--audio-track`).
+- **The mpv plugin** doesn't show a real progress bar. It shows the current step and an elapsed
+  timer on the OSD.
+- **Tested platform:** subfix was developed and benchmarked on Windows 11 with one NVIDIA GPU.
+  Linux and macOS haven't been tested.
+
+---
+
+## Roadmap
+
+- Read and sync subtitle tracks embedded in MKV/MP4.
+- Extract the center channel of 5.1 audio so that VAD and Whisper hear dialogue rather than
+  music.
+- Speaker-aware cue splitting for generated subtitles.
+- A small GUI and/or a VLC extension.
+- Packaging: a PyPI release and a standalone Windows build.
+
+---
+
+## Project layout
+
+```text
+subfix/
+├── cli.py            # Typer CLI: auto / generate / sync / info
+├── pipeline.py       # Context (lazy audio/VAD/transcript), generate, sync, auto, fallbacks
+├── audio.py          # ffmpeg extraction → cached WAV, memmap reader
+├── vad.py            # Silero VAD (ONNX) speech-probability signal, chunked + cached
+├── transcribe.py     # chunked batched faster-whisper, word timestamps, JSON cache
+├── cues.py           # words → readable subtitle cues
+├── device.py         # GPU detection, CUDA DLL setup, model loading with fallback chain
+├── srt_io.py         # tolerant SRT/VTT/ASS reader, encoding detection, SRT writer
+├── config.py         # cache location, defaults
+└── sync/
+    ├── common.py     # shared scoring signal, FFT cross-correlation
+    ├── offset.py
+    ├── drift.py
+    ├── piecewise.py  # Viterbi
+    └── smart.py      # text alignment
+plugins/mpv/          # mpv Lua plugin + README
+benchmarks/           # synthetic film generator, corruptions, memory probe, RESULTS.md
+tests/                # pytest unit tests (synthetic signals, no GPU needed)
+SETUP.md              # Windows setup notes (commit limit, page file, cache)
+DECISIONS.md          # design decisions and what was tried
+SYSTEM_REPORT.md      # hardware/software inventory of the development machine
+```
+
+---
+
+## Development
+
+```bash
+pip install -e ".[dev]"
+pytest            # unit tests; use synthetic signals and subtitles, no audio or GPU required
+ruff check .      # lint
+```
+
+Design decisions, including dead ends and the reasons for the pinned versions, are recorded in
+[DECISIONS.md](DECISIONS.md).
+
+---
+
+## License and credits
+
+subfix is released under the **MIT License**.
+
+It builds on:
+
+- [faster-whisper](https://github.com/SYSTRAN/faster-whisper) and
+  [CTranslate2](https://github.com/OpenNMT/CTranslate2) for fast Whisper inference, with
+  [Whisper](https://github.com/openai/whisper) models by OpenAI.
+- [Silero VAD](https://github.com/snakers4/silero-vad) for voice activity detection, using the
+  ONNX model bundled with faster-whisper.
+- [FFmpeg](https://ffmpeg.org), [rapidfuzz](https://github.com/rapidfuzz/RapidFuzz),
+  [pysubs2](https://github.com/tkarabela/pysubs2), [Typer](https://typer.tiangolo.com) and
+  [Rich](https://github.com/Textualize/rich).
+
+Benchmark material:
+
+- *Tears of Steel* © Blender Foundation, [mango.blender.org](https://mango.blender.org),
+  licensed under CC BY 3.0.
+- *The Adventures of Sherlock Holmes* by Arthur Conan Doyle, from
+  [Project Gutenberg](https://www.gutenberg.org/ebooks/1661) (public domain).

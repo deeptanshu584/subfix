@@ -5,7 +5,7 @@ the same offset; switching costs ``split_penalty``. We maximise::
 
     Σ_i  E[i, o_i]  −  split_penalty · #{i : o_i ≠ o_{i−1}}
 
-where ``E[i, o] = Σ_{t ∈ cue_i + o} (2·p_speech(t) − 1)`` is evaluated in O(1) with prefix sums.
+where ``E[i, o] = Σ_{t ∈ cue_i + o} (p_speech(t) − θ)`` is evaluated in O(1) with prefix sums.
 A hard constraint forbids switches that would make a cue start before the previous one ends
 (subtitles keep their order), handled with a prefix-max over offsets sorted ascending, so each DP
 step is O(K) and the whole thing O(N·K).
@@ -31,14 +31,14 @@ from ..log import log
 from ..srt_io import Subtitle
 from ..vad import SpeechSignal
 from .common import (
+    OUT_OF_RANGE,
     RATE,
     SyncResult,
+    WindowSearch,
     alignment_score,
-    cross_correlate,
     dialogue,
     is_dialogue,
     reference_signal,
-    subtitle_signal,
 )
 
 
@@ -52,7 +52,7 @@ def candidate_offsets(
     rate: int = RATE,
 ) -> list[float]:
     """Coarse offset candidates from the strongest correlation peaks of sliding windows."""
-    max_lag = int(max_offset * rate)
+    search = WindowSearch(ref, max_offset, rate=rate)
     found: list[tuple[float, float]] = []  # (score, offset)
     t0, t1 = subs[0].start, subs[-1].end
     starts = [*np.arange(t0, max(t0 + 1e-6, t1 - window * 0.5), step)] or [t0]
@@ -61,22 +61,9 @@ def candidate_offsets(
     for win in windows:
         if len(win) < 4:
             continue
-        a = max(0, int(win[0].start * rate) - 1)
-        length = int(win[-1].end * rate) + 2
-        sig = subtitle_signal(win, length, rate)
-        sig[:a] = 0
-        on = sig.sum() or 1
-        lags, c = cross_correlate(ref, sig, max_lag)
-        c = c / on
-        # greedy non-maximum suppression (±1.5 s)
-        sup = int(1.5 * rate)
-        cc = c.copy()
-        for _ in range(peaks_per_window):
-            i = int(np.argmax(cc))
-            if cc[i] <= 0:
-                break
-            found.append((float(cc[i]), lags[i] / rate))
-            cc[max(0, i - sup) : i + sup + 1] = -np.inf
+        for score, off, _ in search.peaks(win, k=peaks_per_window):
+            if score > 0:
+                found.append((score, off))
     # cluster offsets within 0.4 s, keep the best-scoring representative
     found.sort(reverse=True)
     reps: list[float] = []
@@ -109,7 +96,8 @@ def viterbi_offsets(
     starts = np.array([s.start for s in subs])
     ends = np.array([s.end for s in subs])
     pad = int(np.abs(offsets_frames).max()) + 2
-    padded = np.concatenate([-np.ones(pad), ref, -np.ones(pad + int(ends.max() * rate) + 2)])
+    tail = np.full(pad + int(ends.max() * rate) + 2, OUT_OF_RANGE)
+    padded = np.concatenate([np.full(pad, OUT_OF_RANGE), ref, tail])
     csum = np.concatenate([[0.0], np.cumsum(padded)])
 
     a_idx = np.round(starts * rate).astype(np.int64)[:, None] + offsets_frames[None, :] + pad
@@ -176,7 +164,11 @@ def sync_piecewise(
     grid = _expand(centres)
     log.debug("piecewise: %d offset clusters, %d grid states", len(centres), len(grid))
     weights = np.array([1.0 if is_dialogue(s) else 0.2 for s in subs])
-    offs = viterbi_offsets(subs, ref, grid, split_penalty_s * RATE, weights)
+    # Express the penalty in "seconds of well-aligned speech" for *this* film: a frame of clear
+    # speech is worth ~0.5 on clean audio but only ~0.2 under a loud score.
+    pos = ref[ref > 0]
+    strength = float(pos.mean()) if len(pos) else 0.5
+    offs = viterbi_offsets(subs, ref, grid, split_penalty_s * RATE * strength, weights)
     segs = _segments(offs, subs)
     out = [
         Subtitle(s.start + o / RATE, s.end + o / RATE, s.text)

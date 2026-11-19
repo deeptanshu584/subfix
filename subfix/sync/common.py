@@ -3,7 +3,7 @@
 All audio-only sync methods score a candidate timing the same way: a subtitle cue displayed while
 someone is speaking earns credit, a cue displayed over silence is penalised::
 
-    score = Σ_t  sub(t) · (2·p_speech(t) − 1)
+    score = Σ_t  sub(t) · (p_speech(t) − θ)        θ = film's mean speech probability
 
 where ``sub(t)`` is 1 while any cue is on screen. Both signals live on a 10 ms grid, so a full
 search over all offsets is one FFT cross-correlation.
@@ -32,7 +32,7 @@ class SyncResult:
 
     subs: list[Subtitle]
     method: str
-    score: float  # normalised alignment score in [-1, 1] (mean of 2p-1 under cues)
+    score: float  # mean of (p − θ) under the cues; higher = better aligned
     confidence: float  # method-specific, roughly 0..1+
     params: dict = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
@@ -68,9 +68,25 @@ def dialogue(subs: Sequence[Subtitle]) -> list[Subtitle]:
     return d if len(d) >= max(3, len(subs) // 5) else [s for s in subs if s.end > s.start]
 
 
+#: Value of the reference signal outside the audio: worse than silence, so cues are never
+#: "parked" before the start or after the end of the film to dodge a weak VAD signal.
+OUT_OF_RANGE = -0.5
+
+
+def speech_threshold(speech: SpeechSignal) -> float:
+    """Adaptive "is this speech?" level: the mean speech probability of the film.
+
+    Silero is confident on clean dialogue (p≈1) but on dialogue under music/effects it often
+    stays at 0.1–0.4 while true non-speech is ≈0.0. Centring on the film's own mean (clamped
+    to [0.05, 0.5]) works for both: synthetic clean speech → ≈0.45, Tears of Steel → ≈0.09.
+    """
+    m = float(speech.probs.mean()) if len(speech.probs) else 0.5
+    return float(np.clip(m, 0.05, 0.5))
+
+
 def reference_signal(speech: SpeechSignal, rate: int = RATE) -> np.ndarray:
-    """``2p − 1`` on the sync grid: +1 = surely speech, −1 = surely silence."""
-    return (2.0 * speech.at_rate(rate) - 1.0).astype(np.float64)
+    """``p − θ`` on the sync grid (θ = :func:`speech_threshold`): >0 speech-like, <0 not."""
+    return (speech.at_rate(rate) - speech_threshold(speech)).astype(np.float64)
 
 
 def subtitle_signal(
@@ -92,13 +108,69 @@ def cross_correlate(
 ) -> tuple[np.ndarray, np.ndarray]:
     """``c[k] = Σ_t sub(t) · ref(t + k)`` for ``k ∈ [-max_lag, max_lag]`` via FFT.
 
-    Returns ``(lags, c)``.
+    ``ref`` is extended with :data:`OUT_OF_RANGE` on both sides, so shifting cues outside the
+    audio is penalised instead of scoring zero. Returns ``(lags, c)``.
     """
-    n = len(ref) + len(sub) + 1
+    tail = max(0, len(sub) + max_lag - len(ref))
+    ref_p = np.concatenate([np.full(max_lag, OUT_OF_RANGE), ref, np.full(tail + 1, OUT_OF_RANGE)])
+    n = len(ref_p) + len(sub) + 1
     nfft = 1 << (n - 1).bit_length()
-    c = np.fft.irfft(np.fft.rfft(ref, nfft) * np.conj(np.fft.rfft(sub, nfft)), nfft)
+    c = np.fft.irfft(np.fft.rfft(ref_p, nfft) * np.conj(np.fft.rfft(sub, nfft)), nfft)
     lags = np.arange(-max_lag, max_lag + 1)
-    return lags, c[lags % nfft]
+    return lags, c[lags + max_lag]
+
+
+class WindowSearch:
+    """Fast offset search for *subsets* of cues (sliding windows).
+
+    The reference is downsampled (default 25 Hz) and padded once; each window then correlates
+    only against ``[window − max_offset, window + max_offset]`` instead of the whole film, so a
+    100-minute film costs a few hundred small FFTs instead of a few hundred film-length ones.
+    """
+
+    def __init__(self, ref: np.ndarray, max_offset: float, factor: int = 4, rate: int = RATE):
+        n = len(ref) // factor * factor
+        self.rate = rate / factor
+        coarse = ref[:n].reshape(-1, factor).mean(axis=1)
+        self.max_lag = int(max_offset * self.rate)
+        pad = np.full(self.max_lag, OUT_OF_RANGE)
+        self.ref_ext = np.concatenate([pad, coarse, pad])
+        self.n = len(coarse)
+
+    def correlate(self, subs: Sequence[Subtitle]) -> tuple[np.ndarray, np.ndarray, float]:
+        """Return ``(lags_seconds, normalised_correlation, cue_frames)`` for ``subs``."""
+        a = max(0, int(subs[0].start * self.rate) - 1)
+        b = int(max(s.end for s in subs) * self.rate) + 2
+        sig = np.zeros(b - a)
+        for s in subs:
+            i, j = int(round(s.start * self.rate)) - a, int(round(s.end * self.rate)) - a
+            sig[max(0, i) : max(0, j)] = 1.0
+        on = sig.sum() or 1.0
+        crop = self.ref_ext[a : b + 2 * self.max_lag]
+        if len(crop) < len(sig) + 2 * self.max_lag:
+            crop = np.concatenate(
+                [crop, np.full(len(sig) + 2 * self.max_lag - len(crop), OUT_OF_RANGE)]
+            )
+        nfft = 1 << (len(crop) + len(sig)).bit_length()
+        c = np.fft.irfft(np.fft.rfft(crop, nfft) * np.conj(np.fft.rfft(sig, nfft)), nfft)
+        c = c[: 2 * self.max_lag + 1] / on
+        lags = np.arange(-self.max_lag, self.max_lag + 1) / self.rate
+        return lags, c, on
+
+    def peaks(self, subs: Sequence[Subtitle], k: int = 3, suppress: float = 1.5):
+        """Top-``k`` ``(score, offset_s, confidence)`` with non-maximum suppression."""
+        lags, c, _ = self.correlate(subs)
+        sup = int(suppress * self.rate)
+        cc = c.copy()
+        out = []
+        for _ in range(k):
+            i = int(np.argmax(cc))
+            if not np.isfinite(cc[i]):
+                break
+            conf = peak_confidence(c, i, exclusion=int(2.0 * self.rate))
+            out.append((float(c[i]), float(lags[i]), conf))
+            cc[max(0, i - sup) : i + sup + 1] = -np.inf
+        return out
 
 
 def parabolic_peak(c: np.ndarray, i: int) -> float:
@@ -125,7 +197,7 @@ def peak_confidence(c: np.ndarray, i: int, exclusion: int) -> float:
 
 
 def alignment_score(subs: Sequence[Subtitle], ref: np.ndarray, rate: int = RATE) -> float:
-    """Mean of ``2p−1`` under all cue intervals (−1 … +1). Higher = better aligned."""
+    """Mean of the reference signal under all cue intervals. Higher = better aligned."""
     sig = subtitle_signal(subs, len(ref), rate)
     on = sig.sum()
     return float((sig * ref).sum() / on) if on else -1.0

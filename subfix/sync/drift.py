@@ -19,7 +19,7 @@ import numpy as np
 from ..log import log
 from ..srt_io import Subtitle, shift
 from ..vad import SpeechSignal
-from .common import SyncResult, alignment_score, dialogue, reference_signal
+from .common import SyncResult, WindowSearch, alignment_score, dialogue, reference_signal
 from .offset import best_offset
 
 FPS = (23.976, 24.0, 25.0, 29.97, 30.0)
@@ -45,13 +45,14 @@ def local_offsets(
     """Estimate offsets of cues within sliding windows → ``[(window_mid, offset, confidence)]``."""
     if not subs:
         return []
+    search = WindowSearch(ref, max_offset)
     out = []
     t_end = subs[-1].end
     t = subs[0].start
     while t < t_end:
         win = [s for s in subs if t <= s.start < t + window]
         if len(win) >= 8:
-            off, _, conf = best_offset(win, ref, max_offset)
+            _, off, conf = search.peaks(win, k=1)[0]
             mid = float(np.median([s.mid for s in win]))
             out.append((mid, off, conf))
         t += step

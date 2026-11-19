@@ -261,6 +261,9 @@ def main() -> None:
             flush=True,
         )
         sys.exit(1)
+    except Exception as exc:  # unexpected: keep the traceback, but tell the plugin too
+        print(f"SUBFIX-ERROR: internal error: {type(exc).__name__}: {exc}", flush=True)
+        raise
 
 
 if __name__ == "__main__":

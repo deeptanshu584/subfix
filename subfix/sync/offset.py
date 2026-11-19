@@ -35,7 +35,7 @@ def best_offset(
 ) -> tuple[float, float, float]:
     """Return ``(offset_seconds, normalised_score, confidence)`` for cues scaled by ``scale``.
 
-    ``normalised_score`` is the mean of ``2p−1`` under the shifted cues (−1 … 1).
+    ``normalised_score`` is the mean reference value (p − θ) under the shifted cues.
     """
     end = max(s.end for s in subs) * scale
     length = max(len(ref), int(end * rate) + 2)
