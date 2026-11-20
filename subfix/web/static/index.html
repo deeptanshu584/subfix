@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="subfix-token" content="__SUBFIX_TOKEN__">
+  <meta name="color-scheme" content="dark">
+  <title>subfix</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <!-- Icon sprite (inline so the page works offline without extra requests). -->
+  <svg class="sprite" aria-hidden="true" focusable="false">
+    <symbol id="i-logo" viewBox="0 0 32 32"><rect x="2" y="5" width="28" height="22" rx="5" fill="currentColor" opacity=".18"/><rect x="2" y="5" width="28" height="22" rx="5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 17h9M20 17h4M8 21h5M16 21h8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
+    <symbol id="i-film" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/></g></symbol>
+    <symbol id="i-audio" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V6l11-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></g></symbol>
+    <symbol id="i-subs" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M7 12h5M14.5 12H17M7 15.5h3M12.5 15.5H17"/></g></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h3.6l2 2.2h7.4A2.5 2.5 0 0 1 21 9.7v7.8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4M7.5 8.5 12 4l4.5 4.5"/><path d="M4 15v3.5A2.5 2.5 0 0 0 6.5 21h11a2.5 2.5 0 0 0 2.5-2.5V15"/></g></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5"/><path d="M5 20h14"/></g></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.01"/></g></symbol>
+    <symbol id="i-chip" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3" stroke-linecap="round"/></g></symbol>
+  </svg>
+
+  <div class="top">
+    <header class="topbar">
+      <div class="brand">
+        <svg class="brand-logo" aria-hidden="true"><use href="#i-logo"/></svg>
+        <span class="brand-name">subfix</span>
+        <span class="brand-tag">subtitles for your movies</span>
+      </div>
+      <div class="topbar-status">
+        <span id="device" class="pill" title="">
+          <svg class="pill-icon" aria-hidden="true"><use href="#i-chip"/></svg>
+          <span id="device-text">Checking device…</span>
+        </span>
+        <span id="conn" class="pill conn" data-conn="connecting" role="status" aria-live="polite">
+          <span class="dot" aria-hidden="true"></span><span id="conn-text">Connecting…</span>
+        </span>
+      </div>
+    </header>
+
+    <div class="banner-slot">
+      <div id="error" class="banner" role="alert" hidden></div>
+    </div>
+  </div>
+
+  <main class="layout">
+    <section class="panel add-panel" aria-labelledby="add-title">
+      <h2 id="add-title" class="panel-title"><span class="step" aria-hidden="true">1</span>Add a movie</h2>
+
+      <button id="choose-media" class="btn btn-primary btn-xl" type="button">
+        <svg class="btn-icon" aria-hidden="true"><use href="#i-folder"/></svg>
+        Choose movie…
+      </button>
+      <p class="hint">Opens a Windows file window. subfix reads the movie right where it is —
+        nothing is copied, and the <code>.srt</code> is saved next to it.</p>
+
+      <div class="divider"><span>or paste a file path</span></div>
+      <form class="path-row" id="path-form" autocomplete="off">
+        <input id="path-input" type="text" spellcheck="false" placeholder="D:\Movies\Movie.mkv"
+               aria-label="Path to a movie or subtitle file">
+        <button id="path-add" class="btn" type="submit">Add</button>
+      </form>
+
+      <div id="drop-zone" class="drop-zone" tabindex="0" role="button"
+           aria-label="Drop a movie or subtitle file here, or press Enter to browse"
+           aria-describedby="drop-note">
+        <svg class="drop-icon" aria-hidden="true"><use href="#i-upload"/></svg>
+        <span class="drop-title">Drop a movie or subtitle file here</span>
+        <span class="drop-sub">or click to browse</span>
+        <input type="file" id="file-input" class="visually-hidden" tabindex="-1" aria-hidden="true">
+      </div>
+      <p id="drop-note" class="hint small">Dropped files are copied to
+        <code id="upload-dir">the temp folder</code> while subfix works and deleted afterwards.
+        For big movies, <strong>Choose movie</strong> is faster — no copy.</p>
+
+      <div id="upload" class="upload" hidden>
+        <div class="upload-line">
+          <span class="upload-name" id="upload-name"></span>
+          <span class="upload-pct" id="upload-pct">0%</span>
+        </div>
+        <div class="bar"><div class="bar-fill" id="upload-fill"></div></div>
+        <div class="upload-line small">
+          <span id="upload-detail" class="muted"></span>
+          <button id="upload-cancel" class="btn btn-ghost btn-sm" type="button">Cancel upload</button>
+        </div>
+      </div>
+
+      <div id="media-card" class="file-card" hidden></div>
+
+      <h2 class="panel-title options-title"><span class="step" aria-hidden="true">2</span>Options</h2>
+
+      <fieldset class="modes">
+        <legend>What should subfix do?</legend>
+        <label class="mode">
+          <input type="radio" name="mode" value="auto" checked>
+          <span class="mode-body">
+            <span class="mode-title">Automatic <span class="badge">recommended</span></span>
+            <span class="mode-desc">Fix a subtitle next to the movie if there is one, otherwise create new subtitles.</span>
+          </span>
+        </label>
+        <label class="mode">
+          <input type="radio" name="mode" value="generate">
+          <span class="mode-body">
+            <span class="mode-title">Generate</span>
+            <span class="mode-desc">Listen to the movie with Whisper and write a brand-new .srt.</span>
+          </span>
+        </label>
+        <label class="mode">
+          <input type="radio" name="mode" value="sync">
+          <span class="mode-body">
+            <span class="mode-title">Sync</span>
+            <span class="mode-desc">Fix the timing of an existing subtitle file so it matches the movie.</span>
+          </span>
+        </label>
+      </fieldset>
+
+      <div class="field" id="subs-field">
+        <span class="field-label" id="subs-label">Subtitle file to sync <span class="muted">(optional)</span></span>
+        <div class="subs-row">
+          <svg class="subs-icon" aria-hidden="true"><use href="#i-subs"/></svg>
+          <span id="subs-name" class="subs-name" aria-labelledby="subs-label">None chosen</span>
+          <button id="choose-subs" class="btn btn-sm" type="button">Choose…</button>
+          <button id="clear-subs" class="btn btn-ghost btn-sm" type="button" disabled>Remove</button>
+        </div>
+        <p class="hint small" id="subs-hint">Leave empty to use the subtitle next to the movie (same name).</p>
+      </div>
+
+      <label class="check" id="translate-field">
+        <input type="checkbox" id="translate">
+        <span>
+          <span class="check-title">Translate to English</span>
+          <span class="hint small" id="translate-hint">For movies in another language. Slower — uses the larger model.</span>
+        </span>
+      </label>
+
+      <div class="field-grid">
+        <div class="field">
+          <label class="field-label" for="language">Spoken language</label>
+          <select id="language">
+            <option value="">Auto-detect</option>
+          </select>
+        </div>
+        <div class="field" id="sync-field">
+          <label class="field-label" for="sync-mode">Sync method <span class="muted">(advanced)</span></label>
+          <select id="sync-mode">
+            <option value="auto" selected>Auto (best available)</option>
+            <option value="offset">Offset — shift every line</option>
+            <option value="drift">Drift — shift + speed</option>
+            <option value="piecewise">Piecewise — cuts and ads</option>
+            <option value="smart">Smart — match spoken words</option>
+          </select>
+        </div>
+      </div>
+
+      <button id="submit" class="btn btn-primary btn-block btn-lg" type="button">Add to queue</button>
+      <p class="hint small center">You can add several movies — they run one after another.</p>
+    </section>
+
+    <section class="panel queue-panel" aria-labelledby="queue-title">
+      <div class="panel-head">
+        <h2 id="queue-title" class="panel-title">Queue</h2>
+        <span id="queue-summary" class="muted small" aria-live="polite"></span>
+      </div>
+      <div id="jobs" class="jobs" aria-live="off"></div>
+      <div id="jobs-empty" class="empty">
+        <svg class="empty-icon" aria-hidden="true"><use href="#i-film"/></svg>
+        <p><strong>Nothing in the queue yet.</strong></p>
+        <p class="muted small">Choose a movie on the left and press <em>Add to queue</em>.</p>
+      </div>
+    </section>
+  </main>
+
+  <section class="panel history-panel" aria-labelledby="history-title">
+    <div class="panel-head">
+      <h2 id="history-title" class="panel-title">History</h2>
+      <button id="clear-history" class="btn btn-ghost btn-sm" type="button"
+              title="Clears this list only — your .srt files are kept">Clear history</button>
+    </div>
+    <div class="table-wrap">
+      <table class="history-table">
+        <thead>
+          <tr><th scope="col">File</th><th scope="col">Mode</th><th scope="col">Length</th>
+            <th scope="col">Took</th><th scope="col">Result</th><th scope="col">Output</th>
+            <th scope="col">Finished</th></tr>
+        </thead>
+        <tbody id="history"></tbody>
+      </table>
+    </div>
+    <p id="history-empty" class="empty-line muted">No finished jobs yet.</p>
+  </section>
+
+  <footer class="footer">
+    <div class="formats-box">
+      <h2 class="footer-title">Supported formats</h2>
+      <dl id="formats" class="formats"></dl>
+    </div>
+    <p class="muted small" id="footer-version">subfix runs entirely on this computer.</p>
+  </footer>
+</body>
+</html>

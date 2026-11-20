@@ -292,6 +292,16 @@ Clearing the history never deletes a `.srt` file.
 
 *A finished job: summary, Download .srt, Open folder and a preview of the first 20 lines.*
 
+![History of finished jobs and the list of supported formats](docs/images/web-history.png)
+
+*History (file, mode, length, time taken, output path) and the supported formats.*
+
+Measured in the end-to-end test on the RTX 4050 (`tests/e2e/web_e2e.py`, real server, real
+GPU): the full 12-minute *Tears of Steel* was transcribed in 12.4 s, and the 3-minute clips
+queued behind it took about 2 s each because the model stays loaded between jobs. Cancelling
+during transcription stopped the job 4.6 s later with no output written; a dropped 18.7 MB
+file was streamed to `<repo>\.cache\uploads` and deleted when its job finished.
+
 The screenshots show *Tears of Steel* (© Blender Foundation,
 [mango.blender.org](https://mango.blender.org), CC BY 3.0).
 
@@ -532,7 +542,7 @@ within 200 ms of the truth.
 % of lines within 200 ms of the truth (median error in ms), 5 random corruptions each:
 
 | Corruption | Material | uncorrected | offset | drift | piecewise | smart |
-|---|---|---:|---:|---:|---:|---:|
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
 | offset | Synthetic (12 + 100 min) | 0.0% (30.4 s) | 100.0% (20 ms) | 100.0% (20 ms) | 100.0% (20 ms) | 100.0% (22 ms) |
 | offset | Tears of Steel (EN subs) | 0.0% (30.4 s) | 100.0% (120 ms) | 100.0% (111 ms) | 100.0% (111 ms) | 100.0% (63 ms) |
 | drift | Synthetic (12 + 100 min) | 1.3% (71.6 s) | 2.7% (45.2 s) | 100.0% (20 ms) | 100.0% (20 ms) | 100.0% (23 ms) |
@@ -619,8 +629,13 @@ film takes 6–13 s; smart sync takes ~4 s once the transcript is cached.
 - **The mpv plugin** doesn't show a real progress bar: mpv only hands over subfix's output when
   it exits, so the OSD shows what is being done and an elapsed timer.
 - **Web UI progress is coarse in places.** Loading the model has no measurable progress, and
-  the transcription bar moves as Whisper finishes segments, so on a long film it advances in
-  steps. The ETA is an estimate and is rough at the start of a job.
+  the transcription bar moves each time Whisper finishes a batch of 8 speech segments (up to
+  ~4 minutes of speech). Dialogue-heavy films update often; a film with little dialogue (such
+  as *Tears of Steel*, speech in 8 % of its runtime) can jump from the start of transcription
+  straight to done. The ETA is an estimate and is rough at the start of a job.
+- **Notifications need Windows notifications switched on** (*Settings → System →
+  Notifications*). If they are off, the right-click menu still works but only writes the
+  result to `<SUBFIX_HOME>\web\context-menu.log`.
 - **Cancelling is cooperative.** ffmpeg is killed within about a second, but Whisper only stops
   after the batch it is working on (a few seconds in the worst case).
 - **Drag and drop copies the file.** Browsers don't reveal a dropped file's path, so the whole

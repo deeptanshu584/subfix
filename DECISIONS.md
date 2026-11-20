@@ -156,3 +156,28 @@ drive unless explicitly allowed; uploads are deleted when their job ends.
 **D27. One GPU queue for everything**: the server publishes `<SUBFIX_HOME>/web/server.json`
 (url + token) so the right-click menu submits to the running server instead of starting a second
 GPU job.
+
+**D28. Built with four parallel subagents against the frozen contract** (backend, frontend,
+windows, docs), each owning disjoint files; the lead owned the core and integration. Mismatches
+found in integration were small: smart sync reported the `sync` stage before transcription
+(fixed in core: reported after the transcript exists), `no_subtitles` was detected by message
+text (fixed: `pipeline.NoSubtitlesError`), and the backend read a private flag (fixed:
+`log.progress_bars_enabled()`).
+
+**D29. Notifications** (user feedback during testing): the first context-menu implementation
+fell back to a blocking message box when toasts failed, and tests showed it on screen. Now:
+non-blocking WinRT toast with "Open subtitles" / "Open folder" actions; message box only if the
+toast API throws (and never in tests); `SUBFIX_NOTIFY=off` makes every test record instead of
+display. Finding: Windows notifications are turned off on this PC, so toasts are silently
+dropped — the result is still logged and the README tells the user where to switch them on.
+
+**D30. GPU end-to-end test of the web UI** (`tests/e2e/web_e2e.py`, real server, headless
+Chrome): native picker (answered with window messages aimed at that dialog only — never global
+keystrokes), generate .mkv/.mp4/.mp3, sync with a dropped .srt (median 120 ms vs the official
+timing = the human-timing floor), translate DE→EN, cancel during transcription (stopped 4.6 s
+later — one Whisper batch), a 3-job queue (strictly sequential), wrong file type (clear message
++ `unsupported_format`), drag-and-drop (streamed to <repo>\.cache\uploads, deleted
+afterwards): 10/10 pass. Also ran the real right-click script against the live server (queued
+via server.json + token) and with the server stopped (CLI fallback, stale server.json ignored).
+Finding: progress moves per batch of 8 speech segments, so a film with sparse dialogue (Tears of
+Steel) jumps from "transcribing" to done; documented rather than faked.
