@@ -12,6 +12,7 @@ from pathlib import Path
 
 import numpy as np
 
+from . import progress as progress_hooks
 from .audio import AudioFile, file_fingerprint
 from .config import CACHE_VERSION, cache_dir
 from .log import log, progress
@@ -105,8 +106,10 @@ def compute_speech_signal(audio: AudioFile, chunk_s: float = 600.0) -> SpeechSig
             pad = (-len(x)) % FRAME_SAMPLES
             if pad:
                 x = np.concatenate([x, np.zeros(pad, dtype=np.float32)])
+            progress_hooks.check_cancel()
             parts.append(_run_silero(session, x))
             bar.update(task, completed=b // audio.sample_rate)
+            progress_hooks.report("vad", b / max(1, n))
     probs = np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
     return SpeechSignal(probs)
 
@@ -117,6 +120,7 @@ def speech_signal(audio: AudioFile, use_cache: bool = True) -> SpeechSignal:
     cache = cache_dir("vad") / f"{key}.silero6.v{CACHE_VERSION}.npy"
     if use_cache and cache.is_file():
         log.debug("VAD cache hit: %s", cache)
+        progress_hooks.report("vad", 1.0, "cached")
         return SpeechSignal(np.load(cache))
     sig = compute_speech_signal(audio)
     if use_cache:

@@ -126,3 +126,33 @@ impossible placement; it just needs the right candidate to exist. ToS piecewise 
 76.2 % → 84.8 % within 200 ms; synthetic unchanged. 10 peaks: no further gain, 2.6× slower on
 the 100-min film. Lowering the split penalty (1.5–6 s) made no difference — it was a
 candidate problem, not a penalty problem.
+
+## Web UI (contract in docs/WEB_API.md)
+
+**D22. In-process jobs with cooperative cancellation** (`subfix/progress.py`): a context-var
+`JobControl` (progress callback + cancel event) that core loops consult; the CLI never sets one,
+so it pays nothing. Chosen over running the CLI as a subprocess because it gives fine-grained
+progress (ffmpeg %, VAD chunks, Whisper segments) and lets the server keep the model loaded
+between queued jobs (`device.keep_models_loaded`). Verified on the 100-min film: cancel during
+transcription stops at the next segment (immediately in the test); cancel during extraction
+kills ffmpeg in 0.94 s, leaves no partial WAV and no ffmpeg process.
+
+**D23. One stable entry point `pipeline.run_job()` → `Outcome`** (kind, output path, cues,
+language, summary, first-20-cue preview). The backend never calls lower-level functions.
+
+**D24. Supported formats measured, not assumed**: an 8 s clip was encoded into each of
+.mkv .mp4 .avi .mov .webm .m4v .wmv .flv .ts .m2ts .mp3 .wav .m4a .flac .aac .ogg .opus and
+decoded by `extract_audio` — all 17 OK. `subfix.formats` is the single source of truth.
+
+**D25. Local-server security**: 127.0.0.1 only, per-run random token (injected into the page,
+required on every API call except health) and a Host-header check. Without them any website open
+in the browser could POST to `127.0.0.1:8765` and queue jobs on arbitrary paths or open folders
+(CSRF / DNS rebinding).
+
+**D26. No copies of big movies**: the native picker (tkinter in a separate process) returns the
+original path; drag-and-drop streams to `<SUBFIX_HOME>/uploads` (D: here) and refuses the system
+drive unless explicitly allowed; uploads are deleted when their job ends.
+
+**D27. One GPU queue for everything**: the server publishes `<SUBFIX_HOME>/web/server.json`
+(url + token) so the right-click menu submits to the running server instead of starting a second
+GPU job.

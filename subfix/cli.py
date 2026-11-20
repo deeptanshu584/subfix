@@ -23,7 +23,7 @@ app = typer.Typer(
     "[dim]Run `subfix MOVIE` for automatic mode.[/]",
 )
 
-COMMANDS = {"auto", "generate", "sync", "info", "--help", "-h", "--version"}
+COMMANDS = {"auto", "generate", "sync", "info", "web", "--help", "-h", "--version"}
 
 
 class Mode(str, Enum):
@@ -196,6 +196,25 @@ def auto(
     else:
         path = do_auto(ctx, subs, mode.value, choice, lang, translate, output)
     print(f"SUBFIX-OUTPUT: {path}", flush=True)
+
+
+@app.command()
+def web(
+    port: Annotated[int, typer.Option(help="Port on 127.0.0.1.")] = 8765,
+    no_browser: Annotated[
+        bool, typer.Option("--no-browser", help="Don't open the browser automatically.")
+    ] = False,
+    upload_dir: Annotated[
+        Path | None,
+        typer.Option(help="Temp folder for drag-and-drop uploads (default: SUBFIX_HOME/uploads)."),
+    ] = None,
+    verbose: VerboseOpt = False,
+) -> None:
+    """Start the local web UI (http://127.0.0.1:PORT) and open it in the browser."""
+    setup_logging(verbose)
+    from .web.server import run
+
+    run(port=port, open_browser=not no_browser, upload_dir=upload_dir)
 
 
 @app.command()

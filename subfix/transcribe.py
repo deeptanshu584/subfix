@@ -14,6 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
+from . import progress as progress_hooks
 from .audio import AudioFile, file_fingerprint
 from .config import CACHE_VERSION, ModelChoice, cache_dir
 from .device import default_choice, load_model
@@ -152,11 +153,14 @@ def transcribe(
     cache = _cache_path(audio, choice, task, language)
     if use_cache and cache.is_file():
         log.info("Using cached transcript ([dim]%s[/])", cache.name)
+        progress_hooks.report("transcribe", 1.0, "cached transcript")
         return Transcript.from_json(cache.read_text(encoding="utf-8"))
 
     from faster_whisper import BatchedInferencePipeline
 
+    progress_hooks.report("load_model", None, f"Loading {choice}")
     model, used = load_model(choice, task)
+    progress_hooks.check_cancel()
     pipeline = BatchedInferencePipeline(model)
     chunks = plan_chunks(audio.duration, speech)
     log.info(
@@ -173,7 +177,10 @@ def transcribe(
         job = bar.add_task(
             "Transcribing" if task == "transcribe" else "Translating", total=round(audio.duration)
         )
+        verb = "transcribing" if task == "transcribe" else "translating"
+        progress_hooks.report("transcribe", 0.0, verb)
         for ci, (a, b) in enumerate(chunks):
+            progress_hooks.check_cancel()
             samples = audio.read(a, b)
             seg_iter, info = pipeline.transcribe(
                 samples,
@@ -207,8 +214,11 @@ def transcribe(
                     )
                 )
                 bar.update(job, completed=min(round(audio.duration), round(s.end + a)))
+                progress_hooks.report("transcribe", (s.end + a) / max(audio.duration, 1e-6), verb)
+                progress_hooks.check_cancel()
             bar.update(job, completed=round(b))
             emit_status(f"transcribed {100 * b / max(audio.duration, 1):.0f}%")
+            progress_hooks.report("transcribe", b / max(audio.duration, 1e-6), verb)
             del samples
             log.debug("chunk %d/%d done", ci + 1, len(chunks))
 

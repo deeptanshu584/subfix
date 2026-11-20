@@ -28,19 +28,24 @@ dependencies = [
     "rapidfuzz==3.14.6",
     "pysubs2==1.9.1",
     "charset-normalizer==3.5.2",
+    "fastapi==0.165.0",           # local web UI (subfix web), bound to 127.0.0.1 only
+    "uvicorn==0.54.0",
 ]
 
 [project.optional-dependencies]
 # CUDA 12 cuBLAS for CTranslate2 on Windows/Linux. cuDNN 9 is bundled in the ctranslate2 wheel on
 # Windows; on Linux also add nvidia-cudnn-cu12==9.*.
 gpu = ["nvidia-cublas-cu12==12.4.5.8"]
-dev = ["pytest==9.2.0", "ruff==0.17.6"]
+dev = ["pytest==9.2.0", "ruff==0.17.6", "httpx==0.28.1", "playwright==1.65.2", "psutil==7.2.2"]
 
 [project.scripts]
 subfix = "subfix.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["subfix*"]
+
+[tool.setuptools.package-data]
+"subfix.web" = ["static/*"]
 
 [tool.ruff]
 line-length = 100

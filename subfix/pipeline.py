@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import progress as progress_hooks
 from .audio import AudioFile, load_audio
 from .config import ModelChoice
 from .cues import transcript_to_subtitles
@@ -88,6 +89,7 @@ def generate(
     if not subs:
         raise RuntimeError("No speech was recognised in this file; nothing to write.")
     path = write_srt(subs, output_path(ctx.media, "generated", out))
+    progress_hooks.report("write", 1.0, str(path))
     log.info(
         "Wrote [bold green]%s[/] (%d cues, language=%s, %.1fs)",
         path,
@@ -249,13 +251,16 @@ def sync(
     )
     ref = reference_signal(ctx.speech)
     before = alignment_score(dialogue(doc.subs), ref)
+    progress_hooks.report("sync", None, f"sync mode: {mode}")
     result = run_sync(ctx, doc.subs, mode, choice, language)
+    progress_hooks.report("sync", 1.0, result.describe())
     after = alignment_score(dialogue(result.subs), ref)
     result.params["score_before"], result.params["score_after"] = before, after
     path = output_path(ctx.media, "synced", out)
     if Path(path).resolve() == Path(subs_path).resolve():
         raise RuntimeError("Refusing to overwrite the original subtitle file.")
     write_srt(result.subs, path)
+    progress_hooks.report("write", 1.0, str(path))
     console.print(
         f"[bold green]✓[/] {result.method}: {result.describe()}  "
         f"[dim](speech overlap {before:+.2f} → {after:+.2f}, {time.perf_counter() - t0:.1f}s)[/]"
@@ -288,3 +293,78 @@ def auto(
     log.info("No subtitles next to the video → generating")
     task = "translate" if translate else "transcribe"
     return generate(ctx, task, language, choice, out)[0]
+
+
+# --------------------------------------------------------------------------- embedding API
+
+
+@dataclass
+class Outcome:
+    """Result of :func:`run_job` (stable API used by the web UI)."""
+
+    kind: str  # "generated" | "synced"
+    output_path: Path
+    cues: int
+    language: str | None
+    summary: str  # one line, e.g. "smart: 47/76 lines matched to transcript (62%)"
+    method: str  # "generate" | "offset" | "drift" | "piecewise" | "smart"
+    preview: list[dict]  # first cues: {"index", "start", "end", "text"}
+    notes: list[str] = field(default_factory=list)
+
+
+def _preview(subs: list[Subtitle], n: int = 20) -> list[dict]:
+    from .srt_io import sanitize
+
+    return [
+        {"index": i + 1, "start": round(s.start, 3), "end": round(s.end, 3), "text": s.text}
+        for i, s in enumerate(sanitize(subs)[:n])
+    ]
+
+
+def run_job(
+    media: Path,
+    mode: str = "auto",
+    subs_path: Path | None = None,
+    sync_mode: str = "auto",
+    translate: bool = False,
+    language: str | None = None,
+    out: Path | None = None,
+    choice: ModelChoice | None = None,
+    audio_track: int = 0,
+    use_cache: bool = True,
+) -> Outcome:
+    """Run one job: ``mode`` = "generate" | "sync" | "auto" (same rules as the CLI).
+
+    * generate: Whisper subtitles (``translate`` → English) → ``<stem>.generated.srt``
+    * sync: re-time ``subs_path`` (or the sidecar next to ``media``) with ``sync_mode``
+    * auto: sync if ``subs_path``/a sidecar exists, else generate
+    Output goes next to ``media`` unless ``out`` is given. Progress and cancellation are taken
+    from :mod:`subfix.progress` (raises :class:`subfix.progress.Cancelled`).
+    """
+    ctx = Context(Path(media), audio_track, use_cache=use_cache)
+    task = "translate" if translate else "transcribe"
+    if mode == "sync" or (mode == "auto" and (subs_path or find_sidecar(ctx.media))):
+        subs_path = subs_path or find_sidecar(ctx.media)
+        if subs_path is None:
+            raise ValueError(f"No subtitle file to sync was given or found next to {media}")
+        path, res, _ = sync(ctx, Path(subs_path), sync_mode, choice, language, out)
+        return Outcome(
+            "synced",
+            Path(path),
+            len(res.subs),
+            language,
+            f"{res.method}: {res.describe()}",
+            res.method,
+            _preview(res.subs),
+            list(res.notes),
+        )
+    if mode not in ("generate", "auto"):
+        raise ValueError(f"unknown mode {mode!r} (expected generate, sync or auto)")
+    path, subs, tr = generate(ctx, task, language, choice, out)
+    summary = (
+        f"generated {len(subs)} cues ({'translated to English from ' if translate else ''}"
+        f"{tr.language})"
+    )
+    return Outcome(
+        "generated", Path(path), len(subs), tr.language, summary, "generate", _preview(subs)
+    )

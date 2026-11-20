@@ -67,6 +67,12 @@ class _NullProgress:
         pass
 
 
+def set_progress_bars(enabled: bool) -> None:
+    """Enable/disable rich progress bars without changing the log level (used by the web UI)."""
+    global _quiet
+    _quiet = not enabled
+
+
 @contextmanager
 def progress(transient: bool = True) -> Iterator[Progress | _NullProgress]:
     """A rich progress bar context; a no-op object in quiet mode or when not a TTY."""

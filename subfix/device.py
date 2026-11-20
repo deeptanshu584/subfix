@@ -160,13 +160,44 @@ def _warm_up(model: WhisperModel) -> None:
     list(segments)
 
 
+#: When True (long-running processes such as the web UI) loaded models are kept in memory and
+#: reused by later jobs; the CLI leaves it False so each run frees its GPU memory on exit.
+keep_models_loaded = False
+_model_cache: dict[tuple[ModelChoice, str], tuple[WhisperModel, ModelChoice]] = {}
+
+
+def release_models() -> None:
+    """Drop cached models (frees VRAM once the last reference is gone)."""
+    import gc
+
+    _model_cache.clear()
+    gc.collect()
+
+
 def load_model(
     choice: ModelChoice, task: str = "transcribe", allow_fallback: bool = True
 ) -> tuple[WhisperModel, ModelChoice]:
     """Load (and warm up) a Whisper model, walking the fallback chain on failure.
 
-    Returns the model and the configuration that actually worked.
+    Returns the model and the configuration that actually worked. With
+    :data:`keep_models_loaded` set, the last loaded model is reused (only one is kept, since a
+    6 GB GPU cannot hold turbo and large-v3 side by side comfortably).
     """
+    key = (choice, task)
+    if keep_models_loaded and key in _model_cache:
+        log.info("Reusing loaded Whisper model [bold]%s[/]", _model_cache[key][1])
+        return _model_cache[key]
+    if keep_models_loaded:
+        release_models()
+    result = _load_model_uncached(choice, task, allow_fallback)
+    if keep_models_loaded:
+        _model_cache[key] = result
+    return result
+
+
+def _load_model_uncached(
+    choice: ModelChoice, task: str, allow_fallback: bool
+) -> tuple[WhisperModel, ModelChoice]:
     register_cuda_dlls()
     from faster_whisper import WhisperModel
 

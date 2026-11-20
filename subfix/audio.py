@@ -19,6 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
+from . import progress as progress_hooks
 from .config import CACHE_VERSION, SAMPLE_RATE, cache_dir
 from .log import log, progress
 
@@ -154,6 +155,7 @@ def extract_audio(
         out_path = cache_dir("audio") / f"{media.stem[:40]}.{key}.wav"
     if out_path.is_file() and not force:
         log.debug("audio cache hit: %s", out_path)
+        progress_hooks.report("extract", 1.0, "cached")
         return out_path
 
     ffmpeg = find_tool("ffmpeg")
@@ -200,11 +202,18 @@ def extract_audio(
         task = bar.add_task("Extracting audio", total=max(duration, 1.0))
         assert proc.stdout is not None
         for line in proc.stdout:
+            if progress_hooks.cancelled():
+                proc.kill()
+                proc.wait()
+                tmp.unlink(missing_ok=True)
+                progress_hooks.check_cancel()
             if line.startswith("out_time_us=") or line.startswith("out_time_ms="):
                 try:
-                    bar.update(task, completed=min(duration, int(line.split("=")[1]) / 1e6))
+                    done = min(duration, int(line.split("=")[1]) / 1e6)
                 except ValueError:
-                    pass
+                    continue
+                bar.update(task, completed=done)
+                progress_hooks.report("extract", done / duration if duration else None)
         stderr = proc.stderr.read() if proc.stderr else ""
         proc.wait()
     if proc.returncode != 0 or not tmp.is_file():
@@ -214,6 +223,7 @@ def extract_audio(
             hint = f" (the file has no audio track #{audio_track})"
         raise AudioError(f"ffmpeg failed{hint}: {stderr.strip()[-500:]}")
     os.replace(tmp, out_path)
+    progress_hooks.report("extract", 1.0)
     return out_path
 
 
