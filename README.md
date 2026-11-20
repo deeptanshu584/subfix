@@ -1,13 +1,15 @@
 # subfix
 
-**subfix** is a command-line tool that does two things with a video file. It **generates
-subtitles** from the audio with [faster-whisper](https://github.com/SYSTRAN/faster-whisper),
-either transcribing the original language or translating to English. It also **fixes subtitles
-that are out of sync**: a constant offset, frame-rate drift (25 vs 23.976 fps), different offsets
-in different parts of the film (cuts, ads, extended scenes), and a "smart" text-aware mode that
-keeps the human-written subtitle text but takes its timing from what Whisper actually heard.
-subfix never overwrites your files. Results go next to the video as `movie.synced.srt` or
-`movie.generated.srt`.
+**subfix** is a command-line tool, with a local [web UI](#web-ui), that does two things with a
+video file. It **generates subtitles** from the audio with
+[faster-whisper](https://github.com/SYSTRAN/faster-whisper), either transcribing the original
+language or translating to English. It also **fixes subtitles that are out of sync**: a constant
+offset, frame-rate drift (25 vs 23.976 fps), different offsets in different parts of the film
+(cuts, ads, extended scenes), and a "smart" text-aware mode that keeps the human-written
+subtitle text but takes its timing from what Whisper actually heard. subfix never overwrites
+your files. Results go next to the video as `movie.synced.srt` or `movie.generated.srt`. If
+you'd rather not use a terminal, a desktop shortcut opens the [web UI](#web-ui) in your browser:
+choose or drop a movie, and the `.srt` appears next to it.
 
 It is built for an ordinary laptop. The development machine has an RTX 4050 with 6 GB of VRAM,
 16 GB of RAM and runs Windows 11. Memory use barely depends on film length (peak 1.9 GB for a
@@ -27,6 +29,7 @@ Wrote movie.synced.srt
 
 - [Quick start](#quick-start)
 - [Install](#install)
+- [Web UI](#web-ui)
 - [How it works](#how-it-works)
 - [Benchmarks](#benchmarks)
 - [mpv plugin](#mpv-plugin)
@@ -56,6 +59,9 @@ subfix generate film.mkv --translate
 
 # Show the GPU, the default models, the ffmpeg location and the cache directory
 subfix info
+
+# Open the local web UI in the browser (http://127.0.0.1:8765)
+subfix web
 ```
 
 | Command | What it does | Output |
@@ -63,6 +69,7 @@ subfix info
 | `subfix MOVIE` (same as `subfix auto MOVIE`) | Syncs a sidecar subtitle if one exists, otherwise generates | `MOVIE.synced.srt` or `MOVIE.generated.srt` |
 | `subfix generate MOVIE` | Whisper transcription (`--translate` for English) | `MOVIE.generated.srt` |
 | `subfix sync MOVIE [SUBS]` | Re-times an existing subtitle file | `MOVIE.synced.srt` |
+| `subfix web` | Local [web UI](#web-ui): queue, live progress, history | `.srt` next to the movie |
 | `subfix info` | Environment check | none |
 
 Useful options (run `subfix <command> --help` for the full list):
@@ -164,6 +171,196 @@ these platforms.
   docs). Install ffmpeg with your package manager.
 - **macOS:** run `brew install ffmpeg` and then `pip install -e ".[dev]"`. CTranslate2 has no
   Metal backend, so it runs on the CPU.
+
+---
+
+## Web UI
+
+If you'd rather not use a terminal: double-click the **subfix** shortcut on the Desktop, the
+browser opens, choose a movie (or drop it on the page), and when the job is done the `.srt` is
+next to the movie. The web UI runs the same code as the CLI and adds a queue, live progress and a
+history. It runs entirely on your own machine: the server listens on `127.0.0.1` only and nothing
+is uploaded anywhere. It needs only the [install](#install) above.
+
+![The subfix web UI: choose a movie, pick options, add it to the queue](docs/images/web-main.png)
+
+*The main page: choose or drop a movie, pick the mode and language, add it to the queue.*
+
+### Launching it
+
+1. **Desktop shortcut (recommended).** Run this once from the repository folder:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File scripts\windows\create_desktop_shortcut.ps1
+   ```
+
+   It puts a **subfix** shortcut on the Desktop that points at `scripts\windows\subfix-web.bat`,
+   which starts `.venv\Scripts\subfix.exe web` in a console window titled "subfix web UI".
+   Double-click the shortcut to start the server and open the browser. Close that window (or
+   press Ctrl+C in it) to stop the server. If the server is already running, starting it again
+   just opens the browser on the running one.
+
+2. **From a terminal:**
+
+   ```bash
+   subfix web                                  # http://127.0.0.1:8765, opens the default browser
+   subfix web --port 9000 --no-browser
+   subfix web --upload-dir E:\subfix-uploads   # where drag-and-drop uploads are stored
+   ```
+
+   If the port is taken by another program (not a subfix server), `subfix web` stops with a
+   message saying so. Pick another `--port`.
+
+3. **Right-click menu in Explorer.** Run this once:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File scripts\windows\install_context_menu.ps1
+   ```
+
+   Every video and audio file type in the [table below](#supported-formats) then gets a
+   **Generate subtitles with subfix** entry. It uses mode *auto*: it syncs a subtitle file next
+   to the movie if there is one, and otherwise generates subtitles. On Windows 11 the entry is
+   under **Show more options**. The script writes only to `HKEY_CURRENT_USER` (no administrator
+   rights, nothing system-wide), and `scripts\windows\uninstall_context_menu.ps1` removes it
+   again. If the web UI is running, a right-click job goes into its queue, so only one GPU job
+   ever runs at a time and the job also shows up on the page. Otherwise the script runs
+   `subfix auto` directly. Either way, a Windows notification shows the output file (or the
+   error) when it's done.
+
+See [scripts/windows/README.md](scripts/windows/README.md) for details on the launcher, the
+shortcut and the context menu.
+
+### Using it
+
+**1. Pick the file.** There are three ways:
+
+- **Choose movie…** opens the normal Windows *Open* dialog. subfix works on the original file
+  where it is, and nothing is copied. Use this for real movies (2–5 GB).
+- **Paste a path** to the file into the text box and press *Add*.
+- **Drag and drop** the file onto the page. Browsers never tell a web page where a dropped file
+  lives, so the file is streamed (with an upload progress bar) into a temporary folder. That is
+  `<repo>\.cache\uploads` on the development machine, `<SUBFIX_HOME>\uploads` in
+  general, and you can change it with `--upload-dir` or the `SUBFIX_UPLOAD_DIR` environment
+  variable. The folder is refused if it is on the Windows system drive, unless you set
+  `SUBFIX_ALLOW_SYSTEM_DRIVE_UPLOADS=1`: a full C: drive also breaks GPU allocations (see
+  [Install](#windows--nvidia-gpu-the-tested-setup)). An upload bigger than the drive's free
+  space minus 1 GB is refused before anything is written. The copy is deleted when its job ends
+  (done, failed or cancelled). Aborted uploads and leftovers from an earlier run are cleaned up
+  too.
+
+For syncing, you can add a subtitle file the same way (**Choose subtitles**, or drop a `.srt`,
+`.ass`, `.ssa` or `.vtt` file). Without one, subfix looks for a subtitle file next to the movie
+with the same rules as the CLI (see *Finding the sidecar file* in [Quick start](#quick-start)).
+
+**2. Pick the options.**
+
+- **Mode:** *Auto* (sync the subtitles if there are any, otherwise generate), *Generate* or
+  *Sync*.
+- **Translate to English:** Whisper translation (with `large-v3`) when generating subtitles. It
+  is ignored when syncing.
+- **Language:** the spoken language. The default is *Auto-detect*; all 100 Whisper languages are
+  listed.
+- **Sync method:** *auto*, *offset*, *drift*, *piecewise* or *smart*, the same as `--mode` on the
+  command line (see [How it works](#how-it-works)).
+
+**3. Add to queue.** You can queue several files. They run one at a time, in order, on the GPU.
+Each job card shows the current stage (*Extracting audio → Detecting speech → Loading Whisper
+model → Transcribing → Synchronising → Writing subtitles*; cached steps finish at once), a
+progress bar for the whole job, an ETA and the live log lines. **Cancel** removes a queued job
+immediately. A running job stops cooperatively: ffmpeg is killed within about a second, and
+Whisper stops after the current batch. The Whisper model stays loaded between queued jobs and is
+released after the queue has been idle for two minutes.
+
+**4. The result.** A finished job shows a summary (for example `generated 76 cues (en)`),
+**Download .srt**, **Open folder** (Explorer with the file selected) and a preview of the first
+20 subtitle lines. Every job that finishes, fails or is cancelled is added to the **history**.
+The history is kept across restarts in `<SUBFIX_HOME>\web\history.jsonl` (the last 500 jobs).
+Clearing the history never deletes a `.srt` file.
+
+**Where the `.srt` is saved:**
+
+| Movie came from | Output |
+| --- | --- |
+| *Choose movie…* or a pasted path | Next to the movie, with the same names as the CLI: `Movie.generated.srt` or `Movie.synced.srt`. If that folder isn't writable, the file goes to the outputs folder below and the result card says so. |
+| Drag and drop | `<SUBFIX_HOME>\web\outputs\<job id>\Movie.generated.srt` (or `.synced.srt`), which is `<repo>\.cache\web\outputs\…` on the development machine. Use **Download .srt** or **Open folder** to get it. |
+
+![A job in progress: stage, progress bar, ETA and live log](docs/images/web-progress.png)
+
+*A job in progress: the current stage, overall progress, ETA and the live log.*
+
+![A finished job: summary, download, open folder and a preview of the subtitles](docs/images/web-result.png)
+
+*A finished job: summary, Download .srt, Open folder and a preview of the first 20 lines.*
+
+The screenshots show *Tears of Steel* (© Blender Foundation,
+[mango.blender.org](https://mango.blender.org), CC BY 3.0).
+
+### Supported formats
+
+| Kind | Extensions |
+| --- | --- |
+| Video | `.mkv` `.mp4` `.avi` `.mov` `.webm` `.m4v` `.wmv` `.flv` `.ts` `.m2ts` |
+| Audio | `.mp3` `.wav` `.m4a` `.flac` `.aac` `.ogg` `.opus` |
+| Subtitles (input for sync) | `.srt` `.ass` `.ssa` `.vtt` |
+
+Files are matched by extension, ignoring case. Anything else is rejected with a message that
+lists these types. The list lives in [`subfix/formats.py`](subfix/formats.py) and was verified,
+not assumed: an 8-second clip was encoded into each of the 17 video and audio containers with
+ffmpeg 9.0.2 and decoded by subfix's audio extraction, and all 17 worked. The output is always a
+UTF-8 `.srt`.
+
+### How the web UI works
+
+```mermaid
+flowchart LR
+    subgraph BR["Browser"]
+        PG["page<br/>index.html + app.js"]
+        ES["EventSource<br/>/api/events"]
+    end
+    RC["Explorer right-click<br/>(PowerShell script)"] -- "reads url + token" --> SJ["server.json<br/>(SUBFIX_HOME/web)"]
+    subgraph SV["FastAPI server, 127.0.0.1 only"]
+        SEC["token + Host check"]
+        API["REST API<br/>pick · inspect · uploads · jobs · history"]
+        Q["job queue (FIFO)<br/>one worker thread"]
+    end
+    PG -- "fetch + X-Subfix-Token" --> SEC
+    RC -- "POST /api/jobs" --> SEC
+    SEC --> API --> Q
+    Q --> CORE["subfix core: pipeline.run_job()<br/>progress hooks + cooperative cancel"]
+    CORE --> ENG["ffmpeg → Silero VAD →<br/>Whisper on the GPU"]
+    ENG --> OUT["Movie.generated.srt /<br/>Movie.synced.srt"]
+    CORE -. "stage, fraction, log lines" .-> Q
+    Q -. "SSE: job · log · history events" .-> ES
+```
+
+- **Jobs run in-process.** The worker thread calls `pipeline.run_job()`, the same code path as
+  the CLI, inside a `progress.use(JobControl)` context. The core's loops (ffmpeg, VAD chunks,
+  Whisper segments) report their stage and progress to it and check its cancel flag. The CLI
+  never sets a controller, so it pays nothing. This gives finer progress than parsing the output
+  of a subprocess, and it lets the server keep the Whisper model loaded between queued jobs.
+- **Live updates use server-sent events.** One `GET /api/events` stream carries `job` updates
+  (at most 4 per second per job), `log` lines and `history` entries. Data only flows from the
+  server to the page, so SSE is enough. `EventSource` reconnects on its own, and the page then
+  re-fetches the job list and history. Commands (add, cancel, open folder) are ordinary JSON
+  requests.
+- **The file picker runs in a separate Python process** (tkinter), so a GUI toolkit never runs
+  inside the server's threads. It returns the original path, and no copy is made.
+- **One GPU queue for everything.** While it runs, the server writes `server.json` (URL and
+  token) to `<SUBFIX_HOME>\web\` and deletes it on shutdown. The right-click script uses it to
+  submit to the running server instead of starting a second GPU job.
+
+The full API (endpoints, events, error codes) is specified in [docs/WEB_API.md](docs/WEB_API.md).
+
+### Security and privacy
+
+The server binds to `127.0.0.1` only, and there is no option to expose it on the network. Being
+local isn't enough on its own: any website open in your browser can send requests to
+`http://127.0.0.1:8765`, and a DNS-rebinding page can even read the answers. So every API call
+must carry a random token that is generated for each server run and injected into the page, and
+requests whose `Host` header isn't `127.0.0.1:<port>` or `localhost:<port>` are rejected.
+Without these checks, a malicious page could queue jobs on arbitrary paths or open folders.
+Your files never leave the machine. Dropped files are only copied to a local temporary folder,
+and the page loads no CDN scripts, web fonts or analytics, so it works offline.
 
 ---
 
@@ -421,6 +618,20 @@ film takes 6–13 s; smart sync takes ~4 s once the transcript is cached.
   audio track is used per run (`--audio-track`).
 - **The mpv plugin** doesn't show a real progress bar: mpv only hands over subfix's output when
   it exits, so the OSD shows what is being done and an elapsed timer.
+- **Web UI progress is coarse in places.** Loading the model has no measurable progress, and
+  the transcription bar moves as Whisper finishes segments, so on a long film it advances in
+  steps. The ETA is an estimate and is rough at the start of a job.
+- **Cancelling is cooperative.** ffmpeg is killed within about a second, but Whisper only stops
+  after the batch it is working on (a few seconds in the worst case).
+- **Drag and drop copies the file.** Browsers don't reveal a dropped file's path, so the whole
+  movie is streamed into the upload folder first. That needs as much free space as the movie,
+  and the `.srt` ends up in the web outputs folder instead of next to the movie. *Choose
+  movie…* or a pasted path avoids both.
+- **The web UI is single-user and local.** It serves `127.0.0.1` only and runs one GPU job at a
+  time. The job list on the page covers the current server run; older jobs are in the history.
+- **The launcher, desktop shortcut, right-click menu and notifications are Windows-only.**
+  `subfix web` itself is plain Python but hasn't been tested on Linux or macOS. The native file
+  picker needs tkinter; without it, paste a path or use drag and drop.
 - **Tested platform:** subfix was developed and benchmarked on Windows 11 with one NVIDIA GPU.
   Linux and macOS haven't been tested.
 
@@ -430,7 +641,9 @@ film takes 6–13 s; smart sync takes ~4 s once the transcript is cached.
 
 - Read and sync subtitle tracks embedded in MKV/MP4.
 - Speaker-aware cue splitting for generated subtitles.
-- A small GUI and/or a VLC extension.
+- A VLC extension.
+- Web UI launcher and file-manager integration for Linux and macOS (the current scripts are
+  Windows-only).
 - Packaging: a PyPI release and a standalone Windows build.
 
 ---
@@ -439,8 +652,12 @@ film takes 6–13 s; smart sync takes ~4 s once the transcript is cached.
 
 ```text
 subfix/
-├── cli.py            # Typer CLI: auto / generate / sync / info
-├── pipeline.py       # Context (lazy audio/VAD/transcript), generate, sync, auto, fallbacks
+├── cli.py            # Typer CLI: auto / generate / sync / web / info
+├── pipeline.py       # Context (lazy audio/VAD/transcript), generate, sync, auto, fallbacks,
+│                     #   run_job() (the single entry point used by the web UI)
+├── progress.py       # progress callbacks + cooperative cancellation (no-op for the CLI)
+├── formats.py        # supported file extensions, Whisper language names
+├── log.py            # console, logging and progress-bar helpers (rich)
 ├── audio.py          # ffmpeg extraction → cached WAV, memmap reader
 ├── vad.py            # Silero VAD (ONNX) speech-probability signal, chunked + cached
 ├── transcribe.py     # chunked batched faster-whisper, word timestamps, JSON cache
@@ -448,15 +665,30 @@ subfix/
 ├── device.py         # GPU detection, CUDA DLL setup, model loading with fallback chain
 ├── srt_io.py         # tolerant SRT/VTT/ASS reader, encoding detection, SRT writer
 ├── config.py         # cache location, defaults
-└── sync/
-    ├── common.py     # shared scoring signal, FFT cross-correlation
-    ├── offset.py
-    ├── drift.py
-    ├── piecewise.py  # Viterbi
-    └── smart.py      # text alignment
+├── sync/
+│   ├── common.py     # shared scoring signal, FFT cross-correlation
+│   ├── offset.py
+│   ├── drift.py
+│   ├── piecewise.py  # Viterbi
+│   └── smart.py      # text alignment
+└── web/              # local web UI (subfix web)
+    ├── server.py     # FastAPI app on 127.0.0.1: token + Host check, SSE, server.json
+    ├── jobs.py       # FIFO queue, one worker thread, progress → events
+    ├── uploads.py    # streamed drag-and-drop uploads
+    ├── picker.py     # native Open dialog (tkinter, separate process)
+    ├── history.py    # history.jsonl
+    ├── common.py     # API errors, timestamps, path helpers
+    └── static/       # index.html, app.js, style.css (no build step, no CDN)
+scripts/windows/      # web UI launcher (.bat), desktop shortcut, HKCU right-click menu,
+                      #   notifications; see scripts/windows/README.md
 plugins/mpv/          # mpv Lua plugin + README
 benchmarks/           # synthetic film generator, corruptions, memory probe, RESULTS.md
+docs/
+├── WEB_API.md        # web UI API and integration contract
+└── images/           # web UI screenshots
 tests/                # pytest unit tests (synthetic signals, no GPU needed)
+├── web/              # web API tests with a mocked pipeline (no GPU)
+└── web_frontend/     # mock server implementing the contract + browser tests for the page
 SETUP.md              # Windows setup notes (commit limit, page file, cache)
 DECISIONS.md          # design decisions and what was tried
 SYSTEM_REPORT.md      # hardware/software inventory of the development machine
@@ -468,12 +700,13 @@ SYSTEM_REPORT.md      # hardware/software inventory of the development machine
 
 ```bash
 pip install -e ".[dev]"
-pytest            # unit tests; use synthetic signals and subtitles, no audio or GPU required
+pytest            # unit tests + web API tests; synthetic data and a mocked pipeline, no audio or GPU
 ruff check .      # lint
 ```
 
 Design decisions, including dead ends and the reasons for the pinned versions, are recorded in
-[DECISIONS.md](DECISIONS.md).
+[DECISIONS.md](DECISIONS.md). The web UI's API (endpoints, events, error codes, page selectors
+used by the tests) is specified in [docs/WEB_API.md](docs/WEB_API.md).
 
 ---
 
@@ -489,10 +722,11 @@ It builds on:
 - [Silero VAD](https://github.com/snakers4/silero-vad) for voice activity detection, using the
   ONNX model bundled with faster-whisper.
 - [FFmpeg](https://ffmpeg.org), [rapidfuzz](https://github.com/rapidfuzz/RapidFuzz),
-  [pysubs2](https://github.com/tkarabela/pysubs2), [Typer](https://typer.tiangolo.com) and
-  [Rich](https://github.com/Textualize/rich).
+  [pysubs2](https://github.com/tkarabela/pysubs2), [Typer](https://typer.tiangolo.com),
+  [Rich](https://github.com/Textualize/rich), and [FastAPI](https://fastapi.tiangolo.com) with
+  [Uvicorn](https://www.uvicorn.org) for the web UI.
 
-Benchmark material:
+Benchmark material and web UI screenshots:
 
 - *Tears of Steel* © Blender Foundation, [mango.blender.org](https://mango.blender.org),
   licensed under CC BY 3.0.

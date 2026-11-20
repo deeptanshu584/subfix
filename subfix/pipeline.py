@@ -191,6 +191,8 @@ def run_sync(
     from .sync.drift import sync_drift
     from .sync.offset import sync_offset
 
+    if mode != "smart" and not (mode == "auto" and cuda_available()):
+        progress_hooks.report("sync", None, f"sync mode: {mode}")
     if mode == "offset":
         return sync_offset(subs, ctx.speech)
     if mode == "drift":
@@ -206,6 +208,7 @@ def run_sync(
 
     emit_status("smart sync: transcribing")
     tr = ctx.transcript("transcribe", language, choice)
+    progress_hooks.report("sync", None, "aligning subtitles to the transcript")
     try:
         return sync_smart(subs, tr, ctx.speech)
     except ValueError as exc:
@@ -251,7 +254,6 @@ def sync(
     )
     ref = reference_signal(ctx.speech)
     before = alignment_score(dialogue(doc.subs), ref)
-    progress_hooks.report("sync", None, f"sync mode: {mode}")
     result = run_sync(ctx, doc.subs, mode, choice, language)
     progress_hooks.report("sync", 1.0, result.describe())
     after = alignment_score(dialogue(result.subs), ref)
@@ -296,6 +298,10 @@ def auto(
 
 
 # --------------------------------------------------------------------------- embedding API
+
+
+class NoSubtitlesError(ValueError):
+    """Sync was requested but there is no subtitle file to sync."""
 
 
 @dataclass
@@ -346,7 +352,9 @@ def run_job(
     if mode == "sync" or (mode == "auto" and (subs_path or find_sidecar(ctx.media))):
         subs_path = subs_path or find_sidecar(ctx.media)
         if subs_path is None:
-            raise ValueError(f"No subtitle file to sync was given or found next to {media}")
+            raise NoSubtitlesError(
+                f"No subtitle file to sync was given or found next to {Path(media).name}"
+            )
         path, res, _ = sync(ctx, Path(subs_path), sync_mode, choice, language, out)
         return Outcome(
             "synced",

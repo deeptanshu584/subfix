@@ -67,6 +67,11 @@ class _NullProgress:
         pass
 
 
+def progress_bars_enabled() -> bool:
+    """Current state of :func:`set_progress_bars`."""
+    return not _quiet
+
+
 def set_progress_bars(enabled: bool) -> None:
     """Enable/disable rich progress bars without changing the log level (used by the web UI)."""
     global _quiet
