@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import sys
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
 
@@ -26,7 +26,7 @@ app = typer.Typer(
 COMMANDS = {"auto", "generate", "sync", "info", "web", "--help", "-h", "--version"}
 
 
-class Mode(str, Enum):
+class Mode(StrEnum):
     auto = "auto"
     offset = "offset"
     drift = "drift"

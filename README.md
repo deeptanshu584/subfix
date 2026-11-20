@@ -1,19 +1,39 @@
 # subfix
 
-**subfix** is a command-line tool, with a local [web UI](#web-ui), that does two things with a
-video file. It **generates subtitles** from the audio with
-[faster-whisper](https://github.com/SYSTRAN/faster-whisper), either transcribing the original
-language or translating to English. It also **fixes subtitles that are out of sync**: a constant
-offset, frame-rate drift (25 vs 23.976 fps), different offsets in different parts of the film
-(cuts, ads, extended scenes), and a "smart" text-aware mode that keeps the human-written
-subtitle text but takes its timing from what Whisper actually heard. subfix never overwrites
-your files. Results go next to the video as `movie.synced.srt` or `movie.generated.srt`. If
-you'd rather not use a terminal, a desktop shortcut opens the [web UI](#web-ui) in your browser:
-choose or drop a movie, and the `.srt` appears next to it.
+**Local subtitles that actually line up.** Drop in a movie and subfix writes the `.srt`: it
+transcribes (or translates to English) with Whisper on your GPU when you have no subtitles, and
+re-times the ones you downloaded when they drift, jump or start 30 seconds late. Nothing leaves
+your machine, and your originals are never touched.
 
-It is built for an ordinary laptop. The development machine has an RTX 4050 with 6 GB of VRAM,
-16 GB of RAM and runs Windows 11. Memory use barely depends on film length (peak 1.9 GB for a
-12-minute film, 2.3 GB for a 100-minute one, mostly the Whisper model).
+[![CI](https://github.com/deeptanshu584/subfix/actions/workflows/ci.yml/badge.svg)](https://github.com/deeptanshu584/subfix/actions/workflows/ci.yml)
+![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)
+![License MIT](https://img.shields.io/badge/license-MIT-green)
+
+![The subfix web UI with a finished job and a subtitle preview](docs/images/web-result.png)
+
+*The local web UI after transcribing the full 12-minute* Tears of Steel *in 14 seconds on a
+6 GB laptop GPU.*
+
+## Features
+
+- **Generate subtitles** with [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
+  (`large-v3-turbo` on GPU, `small` on CPU): any language, or translate to English.
+- **Fix out-of-sync subtitles** in four modes: constant **offset**, linear **drift** (25 vs
+  23.976 fps), **piecewise** offsets (cuts, ads, extended scenes) and **smart** sync, which
+  aligns the human-written text to a Whisper transcript, keeping the text and taking Whisper's
+  timing.
+- **Auto mode**: `subfix movie.mkv` syncs the `.srt` next to the video, or generates one.
+  Outputs are `movie.synced.srt` / `movie.generated.srt`; originals are never overwritten.
+- **Three front ends:** the CLI, a local [web UI](#web-ui) (drag and drop, queue, live
+  progress, history), and an [mpv plugin](#mpv-plugin) (Ctrl+Shift+S). A Windows right-click
+  menu ("Generate subtitles with subfix") and a desktop shortcut are included.
+- **Made for long films on small machines:** a 100-minute film takes 79 s on an RTX 4050 at
+  2.1 GB peak RAM. Works on the original file in place, never copies a 4 GB movie.
+- **Measured, not claimed:** 99.4 % of lines within 200 ms across 19,251 corrupted cue
+  timings. See [Benchmarks](#benchmarks).
+- **Formats:** video `.mkv .mp4 .avi .mov .webm .m4v .wmv .flv .ts .m2ts`, audio
+  `.mp3 .wav .m4a .flac .aac .ogg .opus`, subtitles `.srt .ass .ssa .vtt` in any common
+  encoding (each container verified by encoding and decoding a clip).
 
 ```text
 $ subfix movie.mkv
@@ -27,6 +47,7 @@ Wrote movie.synced.srt
 
 ## Contents
 
+- [Features](#features)
 - [Quick start](#quick-start)
 - [Install](#install)
 - [Web UI](#web-ui)
@@ -97,7 +118,7 @@ probably already in sync, or they belong to a different cut of the film.
 
 ## Install
 
-subfix needs Python 3.10 or newer (developed on 3.13) and ffmpeg. You don't need PyTorch:
+subfix needs Python 3.12 or newer (developed on 3.13) and ffmpeg. You don't need PyTorch:
 Silero VAD runs through the ONNX model bundled with faster-whisper.
 
 ### Windows + NVIDIA GPU (the tested setup)
@@ -105,11 +126,11 @@ Silero VAD runs through the ONNX model bundled with faster-whisper.
 ```powershell
 winget install --id Gyan.FFmpeg.Essentials -e
 
-git clone <this-repo-url> subfix   # or use your existing checkout, e.g. <repo>
+git clone https://github.com/deeptanshu584/subfix.git
 cd subfix
 py -3.13 -m venv .venv
 .venv\Scripts\activate
-pip install -e ".[gpu,dev]"
+pip install -e ".[gpu]"
 
 subfix info        # should report "CUDA: available to CTranslate2"
 ```
@@ -148,12 +169,12 @@ setx SUBFIX_HOME D:\subfix-cache
 > counts against the system *commit limit*. If C: is nearly full, the page file can't grow, and
 > `float16` or `large-v3` can fail with an out-of-memory error even though `nvidia-smi` shows
 > free VRAM. That's why `int8_float16` is the default. Freeing space on C:, moving the page file,
-> or closing browsers helps. See [SETUP.md](SETUP.md) for details.
+> or closing browsers helps. See [docs/WINDOWS_GPU_NOTES.md](docs/WINDOWS_GPU_NOTES.md) for details.
 
 ### CPU only
 
 ```bash
-pip install -e ".[dev]"
+pip install -e .
 ```
 
 subfix detects that CUDA is unavailable and uses `small` / `int8`. On the development
@@ -163,13 +184,13 @@ Whisper; pass `--mode smart` to transcribe anyway.
 
 ### Linux / macOS
 
-Linux and macOS haven't been tested. The code is portable, but there is no benchmark data for
-these platforms.
+The unit and API tests run on Linux in CI (see [Development](#development)), but the GPU path,
+the benchmarks and the end-to-end runs were only done on Windows 11, and macOS is untested.
 
-- **Linux + NVIDIA:** run `pip install -e ".[gpu,dev]" "nvidia-cudnn-cu12==9.*"`. You may need
+- **Linux + NVIDIA:** run `pip install -e ".[gpu]" "nvidia-cudnn-cu12==9.*"`. You may need
   to add the pip-installed `nvidia/*/lib` folders to `LD_LIBRARY_PATH` (see the faster-whisper
   docs). Install ffmpeg with your package manager.
-- **macOS:** run `brew install ffmpeg` and then `pip install -e ".[dev]"`. CTranslate2 has no
+- **macOS:** run `brew install ffmpeg` and then `pip install -e .`. CTranslate2 has no
   Metal backend, so it runs on the CPU.
 
 ---
@@ -239,8 +260,7 @@ shortcut and the context menu.
 - **Paste a path** to the file into the text box and press *Add*.
 - **Drag and drop** the file onto the page. Browsers never tell a web page where a dropped file
   lives, so the file is streamed (with an upload progress bar) into a temporary folder. That is
-  `<repo>\.cache\uploads` on the development machine, `<SUBFIX_HOME>\uploads` in
-  general, and you can change it with `--upload-dir` or the `SUBFIX_UPLOAD_DIR` environment
+  `<SUBFIX_HOME>\uploads` (inside the repository's `.cache` folder for a source checkout), and you can change it with `--upload-dir` or the `SUBFIX_UPLOAD_DIR` environment
   variable. The folder is refused if it is on the Windows system drive, unless you set
   `SUBFIX_ALLOW_SYSTEM_DRIVE_UPLOADS=1`: a full C: drive also breaks GPU allocations (see
   [Install](#windows--nvidia-gpu-the-tested-setup)). An upload bigger than the drive's free
@@ -282,7 +302,7 @@ Clearing the history never deletes a `.srt` file.
 | Movie came from | Output |
 | --- | --- |
 | *Choose movie…* or a pasted path | Next to the movie, with the same names as the CLI: `Movie.generated.srt` or `Movie.synced.srt`. If that folder isn't writable, the file goes to the outputs folder below and the result card says so. |
-| Drag and drop | `<SUBFIX_HOME>\web\outputs\<job id>\Movie.generated.srt` (or `.synced.srt`), which is `<repo>\.cache\web\outputs\…` on the development machine. Use **Download .srt** or **Open folder** to get it. |
+| Drag and drop | `<SUBFIX_HOME>\web\outputs\<job id>\Movie.generated.srt` (or `.synced.srt`), inside the cache folder. Use **Download .srt** or **Open folder** to get it. |
 
 ![A job in progress: stage, progress bar, ETA and live log](docs/images/web-progress.png)
 
@@ -300,7 +320,7 @@ Measured in the end-to-end test on the RTX 4050 (`tests/e2e/web_e2e.py`, real se
 GPU): the full 12-minute *Tears of Steel* was transcribed in 12.4 s, and the 3-minute clips
 queued behind it took about 2 s each because the model stays loaded between jobs. Cancelling
 during transcription stopped the job 4.6 s later with no output written; a dropped 18.7 MB
-file was streamed to `<repo>\.cache\uploads` and deleted when its job finished.
+file was streamed to the upload folder on the data drive and deleted when its job finished.
 
 The screenshots show *Tears of Steel* (© Blender Foundation,
 [mango.blender.org](https://mango.blender.org), CC BY 3.0).
@@ -570,7 +590,11 @@ fluent English output.
 
 A small Lua script for [mpv](https://mpv.io) runs subfix on the file you're watching. It
 syncs the sidecar subtitle, or generates one if there isn't any, and loads the result as soon as
-it's ready. The default key is **Ctrl+Shift+S**. The plugin calls the CLI with a hidden
+it's ready. The default key is **Ctrl+Shift+S** (Ctrl+Shift+G always generates, Ctrl+Shift+T
+generates English subtitles, Ctrl+Shift+X cancels). Install it with
+`powershell -ExecutionPolicy Bypass -File scripts\windows\install_mpv_plugin.ps1`, which finds
+your mpv config folder and your subfix install; the plugin looks for subfix in its `executable=`
+option, then `$SUBFIX_EXE`, then `PATH`. The plugin calls the CLI with a hidden
 `--status` flag and reads the machine-readable `SUBFIX-STATUS:` / `SUBFIX-OUTPUT:` /
 `SUBFIX-ERROR:` lines it prints. See [plugins/mpv/README.md](plugins/mpv/README.md) for
 installation and options.
@@ -704,9 +728,8 @@ docs/
 tests/                # pytest unit tests (synthetic signals, no GPU needed)
 ├── web/              # web API tests with a mocked pipeline (no GPU)
 └── web_frontend/     # mock server implementing the contract + browser tests for the page
-SETUP.md              # Windows setup notes (commit limit, page file, cache)
+docs/                 # WEB_API.md (web UI contract), WINDOWS_GPU_NOTES.md, images/
 DECISIONS.md          # design decisions and what was tried
-SYSTEM_REPORT.md      # hardware/software inventory of the development machine
 ```
 
 ---
@@ -715,9 +738,14 @@ SYSTEM_REPORT.md      # hardware/software inventory of the development machine
 
 ```bash
 pip install -e ".[dev]"
-pytest            # unit tests + web API tests; synthetic data and a mocked pipeline, no audio or GPU
-ruff check .      # lint
+pytest -m "not browser"                # unit + web API tests: synthetic data, mocked pipeline, no GPU
+pytest tests/web_frontend -m browser   # web UI tests in headless Chrome against a mock server
+ruff check . && ruff format --check subfix tests benchmarks
 ```
+
+GitHub Actions runs ruff and the CPU-only tests on Linux and Windows for every push and pull
+request. `tests/e2e/` holds the GPU end-to-end scripts for the web UI; they need the media
+described in `tests/e2e/prepare_media.py` and are run by hand.
 
 Design decisions, including dead ends and the reasons for the pinned versions, are recorded in
 [DECISIONS.md](DECISIONS.md). The web UI's API (endpoints, events, error codes, page selectors
@@ -745,5 +773,6 @@ Benchmark material and web UI screenshots:
 
 - *Tears of Steel* © Blender Foundation, [mango.blender.org](https://mango.blender.org),
   licensed under CC BY 3.0.
+- A German LibriVox recording of a Grimm fairy tale (public domain) for the translation test.
 - *The Adventures of Sherlock Holmes* by Arthur Conan Doyle, from
   [Project Gutenberg](https://www.gutenberg.org/ebooks/1661) (public domain).

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import threading
 import wave
 from pathlib import Path
@@ -287,6 +288,7 @@ def test_upload_unsupported_extension_rejected(client, env):
     assert not env["uploads"].exists() or not any(env["uploads"].iterdir())
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="the system-drive rule is Windows-only")
 def test_upload_refused_on_system_drive(client, env, monkeypatch):
     monkeypatch.delenv("SUBFIX_ALLOW_SYSTEM_DRIVE_UPLOADS")
     monkeypatch.setenv("SYSTEMDRIVE", env["uploads"].drive or "C:")

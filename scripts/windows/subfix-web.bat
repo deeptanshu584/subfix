@@ -14,7 +14,7 @@ if not exist "%SUBFIX_EXE%" (
     echo.
     echo  subfix is not installed yet: "%SUBFIX_EXE%" was not found.
     echo.
-    echo  Set it up first ^(see SETUP.md in "%SUBFIX_REPO%"^), for example:
+    echo  Set it up first ^(see the README in "%SUBFIX_REPO%"^), for example:
     echo      cd /d "%SUBFIX_REPO%"
     echo      py -3.13 -m venv .venv
     echo      .venv\Scripts\python -m pip install -e ".[gpu,dev]"

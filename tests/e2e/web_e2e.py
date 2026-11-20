@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import ctypes
 import json
+import os
 import sys
 import threading
 import time
@@ -26,7 +27,7 @@ from playwright.sync_api import Page, expect, sync_playwright
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 ROOT = Path(__file__).resolve().parents[2]
-E2E = ROOT / ".cache" / "tmp" / "e2e"
+E2E = Path(os.environ.get("SUBFIX_E2E_DIR", ROOT / ".cache" / "tmp" / "e2e"))
 HOME = ROOT / ".cache"
 URL = "http://127.0.0.1:8765/"
 RESULTS: list[dict] = []

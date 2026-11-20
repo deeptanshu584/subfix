@@ -7,7 +7,7 @@ name = "subfix"
 version = "0.1.0"
 description = "Generate subtitles with Whisper and fix out-of-sync subtitles (offset, drift, piecewise, text-aware smart sync)."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "subfix contributors" }]
 keywords = ["subtitles", "whisper", "srt", "sync", "vad", "mpv"]
@@ -16,7 +16,7 @@ classifiers = [
     "Environment :: Console",
     "Topic :: Multimedia :: Video",
 ]
-# Pinned to the exact versions verified on the development machine (see SYSTEM_REPORT.md).
+# Pinned to the exact versions verified during development (see docs/WINDOWS_GPU_NOTES.md).
 dependencies = [
     "faster-whisper==1.2.1",
     "ctranslate2==4.9.0",
@@ -49,7 +49,7 @@ include = ["subfix*"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]

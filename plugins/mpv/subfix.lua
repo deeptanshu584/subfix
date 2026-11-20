@@ -18,7 +18,8 @@ local utils = require "mp.utils"
 local options = require "mp.options"
 
 local opts = {
-    -- Path to subfix(.exe). Empty = try the known install location, then PATH.
+    -- Path to subfix(.exe). Empty = $SUBFIX_EXE if set, otherwise `subfix` on PATH.
+    -- scripts/windows/install_mpv_plugin.ps1 fills this in with your venv's subfix.exe.
     executable = "",
     -- Extra arguments appended to every call, e.g.  --no-cache --audio-track 1
     extra_args = "",
@@ -41,7 +42,6 @@ local opts = {
 options.read_options(opts, "subfix")
 
 local IS_WINDOWS = package.config:sub(1, 1) == "\\"
-local KNOWN_EXECUTABLES = { [[<repo>\.venv\Scripts\subfix.exe]] }
 local SUB_EXTENSIONS = { srt = true, vtt = true, ass = true }
 local CANCEL_HINT = "Ctrl+Shift+X cancels"
 
@@ -124,10 +124,9 @@ local function resolve_executable()
     if opts.executable ~= "" then
         return mp.command_native({ "expand-path", opts.executable }) or opts.executable
     end
-    for _, candidate in ipairs(KNOWN_EXECUTABLES) do
-        if is_file(candidate) then
-            return candidate
-        end
+    local from_env = os.getenv("SUBFIX_EXE")
+    if from_env and from_env ~= "" then
+        return from_env
     end
     return "subfix" -- rely on PATH
 end

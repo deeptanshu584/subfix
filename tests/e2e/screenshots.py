@@ -7,6 +7,7 @@ Usage: python tests/e2e/screenshots.py docs/images
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 from pathlib import Path
@@ -14,7 +15,7 @@ from pathlib import Path
 from playwright.sync_api import expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[2]
-E2E = ROOT / ".cache" / "tmp" / "e2e"
+E2E = Path(os.environ.get("SUBFIX_E2E_DIR", ROOT / ".cache" / "tmp" / "e2e"))
 OUT = Path(sys.argv[1] if len(sys.argv) > 1 else ROOT / "docs" / "images")
 OUT.mkdir(parents=True, exist_ok=True)
 

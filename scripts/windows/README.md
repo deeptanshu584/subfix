@@ -8,6 +8,7 @@ These helpers make subfix easy to use without typing commands:
 | `create_desktop_shortcut.ps1` | Puts a **subfix** icon on your Desktop that starts the web UI (`-Remove` takes it away). |
 | `install_context_menu.ps1` | Adds **Generate subtitles with subfix** to the right-click menu of video and audio files. |
 | `uninstall_context_menu.ps1` | Removes that menu entry again. |
+| `install_mpv_plugin.ps1` | Installs the [mpv plugin](../../plugins/mpv/README.md) into your mpv config folder and fills in the path to subfix (`-Remove` uninstalls). |
 | `subfix_context.ps1` | What the menu entry runs (you never need to start it yourself). |
 | `subfix_toast.ps1` | Shows the "Subtitles ready" / "subfix failed" notifications (Windows toasts). |
 | `subfix.ico`, `subfix.png` | Icons. |
@@ -16,7 +17,7 @@ Nothing here needs administrator rights, and nothing is changed for other users 
 
 ## Before you start
 
-subfix itself must be installed first (see `SETUP.md` in the subfix folder). You can check: the
+subfix itself must be installed first (see the install steps in the main README). You can check: the
 file `.venv\Scripts\subfix.exe` must exist inside the subfix folder. If it doesn't,
 `subfix-web.bat` tells you so and waits for a key press.
 
@@ -102,7 +103,7 @@ entry), and re-create the Desktop shortcut.
 * **"Run with PowerShell" is missing / the script opens in Notepad**: open the Start menu,
   type `powershell`, open **Windows PowerShell**, and run (adjust the folder):
   ```
-  cd "<repo>\scripts\windows"
+  cd "<folder where you cloned subfix>\scripts\windows"
   powershell -ExecutionPolicy Bypass -File install_context_menu.ps1
   ```
 * **Nothing happens after clicking the menu entry**: look at the log file

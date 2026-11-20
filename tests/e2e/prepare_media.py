@@ -6,6 +6,7 @@ benchmarks/data/real/grimm_grossvater_de.mp3 and benchmarks/data/synth_long.mkv.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -17,7 +18,7 @@ sys.path.insert(0, str(ROOT))
 from subfix.audio import find_tool  # noqa: E402
 from subfix.srt_io import load_subtitles, shift, write_srt  # noqa: E402
 
-E2E = ROOT / ".cache" / "tmp" / "e2e"
+E2E = Path(os.environ.get("SUBFIX_E2E_DIR", ROOT / ".cache" / "tmp" / "e2e"))
 REAL = ROOT / "benchmarks" / "data" / "real"
 TOS = REAL / "tears_of_steel_720p.mov"
 

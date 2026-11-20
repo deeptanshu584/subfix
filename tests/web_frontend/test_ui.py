@@ -64,7 +64,7 @@ def test_page_loads_with_token_and_config(page: Page, mock: MockControl) -> None
     token = page.get_attribute('meta[name="subfix-token"]', "content")
     assert token == mock.token
     expect(page.locator("#device")).to_contain_text("GPU: RTX 4050 · large-v3-turbo")
-    expect(page.locator("#upload-dir")).to_have_text(r"<repo>\.cache\uploads")
+    expect(page.locator("#upload-dir")).to_have_text(r"D:\subfix-data\uploads")
     formats = page.locator("#formats")
     for ext in (".mkv", ".m2ts", ".opus", ".srt", ".vtt"):
         expect(formats).to_contain_text(ext)
@@ -274,7 +274,7 @@ def test_upload_via_file_input(page: Page, mock: MockControl) -> None:
     job = page.locator(".job").first
     expect(job).to_contain_text("uploaded copy")
     expect(job).to_have_attribute("data-state", "done", timeout=15_000)
-    expect(job.locator(".output-path")).to_contain_text(r"\.cache\web\outputs")
+    expect(job.locator(".output-path")).to_contain_text(r"\web\outputs")
 
 
 def test_drop_movie_and_subtitle(page: Page, mock: MockControl) -> None:

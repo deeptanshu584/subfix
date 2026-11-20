@@ -13,3 +13,36 @@ benchmarks/work/
 *.wav
 *.mp4
 *.mkv
+# more media / large artefacts (never commit movies, audio, models or caches)
+*.mov
+*.avi
+*.m4v
+*.webm
+*.wmv
+*.flv
+*.m2ts
+*.ts
+*.mp3
+*.m4a
+*.flac
+*.aac
+*.ogg
+*.opus
+*.onnx
+*.bin
+*.safetensors
+*.srt
+!benchmarks/**/*.srt
+!tests/**/*.srt
+# runtime state (history, upload temp, server session with its token)
+history.jsonl
+server.json
+*.log
+.env
+.env.*
+# personal notes kept locally only
+/RESUME.md
+/TODO.md
+/SYSTEM_REPORT.md
+tests/web_frontend/screenshots/*.png
+.cache/

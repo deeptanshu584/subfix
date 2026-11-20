@@ -92,7 +92,7 @@ try {
     $command = "`"$PowerShellExe`" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ContextScript`" `"%1`""
     $exe = Join-Path $Repo '.venv\Scripts\subfix.exe'
     if (-not (Test-Path -LiteralPath $exe)) {
-        Write-Warning "$exe not found. The menu will be installed, but it can only work once subfix is installed (see SETUP.md)."
+        Write-Warning "$exe not found. The menu will be installed, but it can only work once subfix is installed (see the README install steps)."
     }
 
     $hkcu = [Microsoft.Win32.Registry]::CurrentUser

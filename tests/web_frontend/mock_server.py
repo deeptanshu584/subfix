@@ -42,8 +42,8 @@ STAGE_LABELS = {
     "write": "Writing subtitles",
 }
 WEIGHTS = {"extract": 5, "vad": 7, "load_model": 3, "transcribe": 80, "sync": 3, "write": 2}
-UPLOAD_DIR = r"<repo>\.cache\uploads"
-OUTPUTS_DIR = r"<repo>\.cache\web\outputs"
+UPLOAD_DIR = r"D:\subfix-data\uploads"
+OUTPUTS_DIR = r"D:\subfix-data\web\outputs"
 FINAL = {"done", "failed", "cancelled"}
 LINES = [
     "You're a jerk, Thom.",
@@ -676,7 +676,7 @@ def create_app(job_seconds: float = 4.0, token: str | None = None) -> FastAPI:
                 while True:
                     try:
                         item = await asyncio.wait_for(q.get(), timeout=15)
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         yield ": ping\n\n"
                         continue
                     if item is None:

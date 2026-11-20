@@ -33,7 +33,7 @@ platform cache dir (`%LOCALAPPDATA%\subfix\Cache`). Setting a persistent user en
 done automatically (it's a system change); the source-checkout default keeps everything on D:.
 Also sets `HF_HOME` inside the process (if unset) so Hugging Face's xet cache doesn't land on C:.
 
-**D9. ffmpeg** installed with winget (`Gyan.FFmpeg.Essentials`) to `<ffmpeg folder>`.
+**D9. ffmpeg** installed with winget (`Gyan.FFmpeg.Essentials`) to a folder on the data drive.
 subfix looks for ffmpeg in `$SUBFIX_FFMPEG`, `PATH`, then the WinGet Links folder, so it works
 even in shells started before the PATH change.
 
@@ -176,7 +176,7 @@ Chrome): native picker (answered with window messages aimed at that dialog only 
 keystrokes), generate .mkv/.mp4/.mp3, sync with a dropped .srt (median 120 ms vs the official
 timing = the human-timing floor), translate DE→EN, cancel during transcription (stopped 4.6 s
 later — one Whisper batch), a 3-job queue (strictly sequential), wrong file type (clear message
-+ `unsupported_format`), drag-and-drop (streamed to <repo>\.cache\uploads, deleted
++ `unsupported_format`), drag-and-drop (streamed to `<SUBFIX_HOME>\uploads` on the data drive, deleted
 afterwards): 10/10 pass. Also ran the real right-click script against the live server (queued
 via server.json + token) and with the server stopped (CLI fallback, stale server.json ignored).
 Finding: progress moves per batch of 8 speech segments, so a film with sparse dialogue (Tears of

@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install "ruff==0.17.6"
+      - run: ruff check .
+      - run: ruff format --check subfix tests benchmarks
+
+  test:
+    name: tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, python: "3.12" }
+          - { os: windows-latest, python: "3.13" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      # CPU-only: no GPU extra, no Whisper models. The tests use synthetic speech signals and a
+      # mocked transcriber, so nothing here needs CUDA, a model download or real media.
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Unit and API tests (no browser)
+        run: pytest -m "not browser" -p no:cacheprovider
+      - name: Browser UI tests (headless Chrome against a mock server)
+        run: pytest tests/web_frontend -m browser -p no:cacheprovider
+        env:
+          SUBFIX_NOTIFY: "off"

@@ -23,7 +23,7 @@ calling the subfix core in-process.
 | `subfix/web/static/` (`index.html`, `app.js`, `style.css`, icons) | **frontend** | the page; no build step, no CDN |
 | `tests/web_frontend/` | **frontend** | mock server implementing this contract + browser tests |
 | `scripts/windows/` | **windows** | launcher `.bat`, shortcut script, HKCU context menu, toast |
-| `README.md` (web UI section), `RESUME.md` | **docs** | screenshots as placeholders `docs/images/web-*.png` |
+| `README.md` (web UI section) | **docs** | screenshots as placeholders `docs/images/web-*.png` |
 | `docs/images/` | lead | real screenshots (Tears of Steel only) |
 
 ## 2. Core API used by the backend (already implemented and tested by the lead)
@@ -203,8 +203,8 @@ All responses are JSON unless noted. Token rules in §3.
   "device": {"cuda": true, "gpu": "NVIDIA GeForce RTX 4050 Laptop GPU", "vram_mb": 6141},
   "defaults": {"transcribe": "large-v3-turbo on cuda (int8_float16)",
                "translate": "large-v3 on cuda (int8_float16)"},
-  "upload_dir": "<repo>\\.cache\\uploads",
-  "outputs_dir": "<repo>\\.cache\\web\\outputs",
+  "upload_dir": "D:\\subfix-data\\uploads",
+  "outputs_dir": "D:\\subfix-data\\web\\outputs",
   "formats": {"video": [...], "audio": [...], "subtitle": [...]},
   "languages": [{"code": "en", "name": "English"}, ...],
   "modes": ["auto", "generate", "sync"],
@@ -278,7 +278,7 @@ Job failures (in `job.error.code`): `cancelled` is a state, not an error; failur
 * Browsers never reveal a dropped file's real path, so dropped files are **streamed** (no
   buffering in memory) to `<upload_dir>/<upload_id>/<sanitised name>`, 1 MiB chunks.
 * `upload_dir`: `--upload-dir` / env `SUBFIX_UPLOAD_DIR` / default `<SUBFIX_HOME>/uploads`
-  (`<repo>\.cache\uploads` here). Refused if on the system drive (see §8).
+  (for example `D:\subfix-data\uploads`). Refused if on the system drive (see §8).
 * The extension is validated **before** the body is read; free space is checked against
   `size`. A failed/aborted upload deletes its partial file.
 * Deletion: when the job that uses the upload reaches a final state (done/failed/cancelled),

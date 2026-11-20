@@ -15,22 +15,32 @@ Only local files are supported. Network streams show `subfix only works on local
 
 ## 1. Install mpv (Windows)
 
-Your C: drive is nearly full, so install mpv to D:
-
 ```powershell
-winget install --id shinchiro.mpv -e --location <mpv folder>
+winget install --id shinchiro.mpv -e
 ```
 
-If winget ignores `--location`, download a build from <https://github.com/shinchiro/mpv-winbuild-cmake/releases> instead (an `mpv-x86_64-*.7z` file) and extract it to `<mpv folder>`. mpv is portable, so nothing else needs installing.
+(`--location <folder>` installs it elsewhere, for example on a drive with more space. If winget
+ignores it, download a build from <https://github.com/shinchiro/mpv-winbuild-cmake/releases>, an
+`mpv-x86_64-*.7z` file, and extract it anywhere. mpv is portable, so nothing else needs installing.)
 
-## 2. Find the mpv config folder
+## 2. Install the plugin
 
-mpv uses the first of these that exists:
+**Easiest:** from the repository folder run
 
-1. **Portable:** a `portable_config` folder next to `mpv.exe`, for example `<mpv folder>\portable_config\`. Create the folder to switch mpv to portable mode, which keeps everything on D:.
-2. **Per user:** `%APPDATA%\mpv\` (that is, `C:\Users\<you>\AppData\Roaming\mpv\`).
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\windows\install_mpv_plugin.ps1
+```
 
-## 3. Copy the plugin
+It finds your mpv config folder, copies `subfix.lua` and `subfix.conf` there, and writes the
+path of this checkout's `.venv\Scripts\subfix.exe` into `subfix.conf` (`-Remove` takes the plugin
+away again; `-ConfigDir <folder>` overrides the config folder it picks).
+
+**By hand.** mpv uses the first config folder that exists:
+
+1. **Portable:** a `portable_config` folder next to `mpv.exe`. Create it to switch mpv to portable mode.
+2. **Per user:** `%APPDATA%\mpv\`.
+
+and the files go to
 
 ```
 <config>\scripts\subfix.lua
@@ -42,19 +52,21 @@ For example, in PowerShell with a portable setup:
 ```powershell
 $cfg = "<mpv folder>\portable_config"
 New-Item -ItemType Directory -Force "$cfg\scripts", "$cfg\script-opts" | Out-Null
-Copy-Item <repo>\plugins\mpv\subfix.lua  "$cfg\scripts\"
-Copy-Item <repo>\plugins\mpv\subfix.conf "$cfg\script-opts\"
+Copy-Item plugins\mpv\subfix.lua  "$cfg\scripts\"
+Copy-Item plugins\mpv\subfix.conf "$cfg\script-opts\"
 ```
 
 Keep the file name `subfix.lua`. mpv takes the script name from it, and the binding names (`subfix/auto` and so on) and the `subfix.conf` options depend on that name.
 
-## 4. Configure
+Then set `executable=` in `subfix.conf` (next section) unless `subfix` is on your `PATH` or the `SUBFIX_EXE` environment variable points at it.
+
+## 3. Configure
 
 Edit `script-opts\subfix.conf`. Write `key=value`, with no quotes:
 
 | Option | Default | Meaning |
 |---|---|---|
-| `executable` | known install path, then `subfix` on PATH | Full path to `subfix.exe`, e.g. `<repo>\.venv\Scripts\subfix.exe` |
+| `executable` | empty → `$SUBFIX_EXE`, then `subfix` on PATH | Full path to `subfix.exe`, e.g. `C:\path\to\subfix\.venv\Scripts\subfix.exe` |
 | `mode` | `auto` | Sync mode: `auto`, `offset`, `drift`, `piecewise`, `smart` |
 | `device` | `auto` | `auto`, `cuda` or `cpu` |
 | `model` | (empty) | Whisper model. Leave empty to let subfix choose. |
