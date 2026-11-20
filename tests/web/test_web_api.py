@@ -23,7 +23,7 @@ def test_health_needs_no_token(app):
     with TestClient(app, base_url=f"http://127.0.0.1:{PORT}") as c:
         r = c.get("/api/health")
     assert r.status_code == 200
-    assert r.json() == {"status": "ok", "app": "subfix", "version": "0.1.0"}
+    assert r.json() == {"status": "ok", "app": "subfix", "version": "1.0.0"}
     assert "access-control-allow-origin" not in r.headers
 
 
@@ -94,7 +94,7 @@ def test_error_format_for_unknown_route_and_validation(client):
 
 def test_config(client, env):
     c = client.get("/api/config").json()
-    assert c["version"] == "0.1.0"
+    assert c["version"] == "1.0.0"
     assert c["device"]["gpu"] == "Fake GPU"
     assert c["upload_dir"] == str(env["uploads"])
     assert c["outputs_dir"] == str(env["home"] / "web" / "outputs")

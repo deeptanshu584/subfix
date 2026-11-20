@@ -49,7 +49,7 @@ def test_sse_hello_job_log_history_and_ping(live, env):
         lines = r.iter_lines()
         first = read_events(lines, lambda ev: any(n == "hello" for n, _ in ev))
         hello = next(d for n, d in first if n == "hello")
-        assert hello["version"] == "0.1.0" and hello["time"]
+        assert hello["version"] == "1.0.0" and hello["time"]
         job = c.post(
             "/api/jobs",
             json={"media": {"path": str(media)}},

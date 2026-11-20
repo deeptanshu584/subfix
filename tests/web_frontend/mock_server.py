@@ -32,7 +32,7 @@ from fastapi.staticfiles import StaticFiles
 from subfix import formats
 
 STATIC_DIR = Path(__file__).resolve().parents[2] / "subfix" / "web" / "static"
-VERSION = "0.1.0"
+VERSION = "1.0.0"
 STAGE_LABELS = {
     "extract": "Extracting audio",
     "vad": "Detecting speech",

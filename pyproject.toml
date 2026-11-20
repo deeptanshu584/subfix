@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "subfix"
-version = "0.1.0"
+version = "1.0.0"
 description = "Generate subtitles with Whisper and fix out-of-sync subtitles (offset, drift, piecewise, text-aware smart sync)."
 readme = "README.md"
 requires-python = ">=3.12"

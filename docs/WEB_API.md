@@ -178,7 +178,7 @@ All responses are JSON unless noted. Token rules in §3.
 
 | Method & path | Request | Response |
 |---|---|---|
-| `GET /api/health` (no token) | – | `{"status": "ok", "app": "subfix", "version": "0.1.0"}` |
+| `GET /api/health` (no token) | – | `{"status": "ok", "app": "subfix", "version": "1.0.0"}` |
 | `GET /api/config` | – | see below |
 | `GET /api/formats` | – | `{"video": [...], "audio": [...], "subtitle": [...]}` |
 | `POST /api/pick` | `{"kind": "media" \| "subtitle"}` | `{"path": "D:\\...\\x.mkv"}` or `{"path": null}` if the dialog was cancelled |
@@ -199,7 +199,7 @@ All responses are JSON unless noted. Token rules in §3.
 
 ```json
 {
-  "version": "0.1.0",
+  "version": "1.0.0",
   "device": {"cuda": true, "gpu": "NVIDIA GeForce RTX 4050 Laptop GPU", "vram_mb": 6141},
   "defaults": {"transcribe": "large-v3-turbo on cuda (int8_float16)",
                "translate": "large-v3 on cuda (int8_float16)"},
@@ -241,7 +241,7 @@ All responses are JSON unless noted. Token rules in §3.
 
 | `event:` | `data:` (JSON) | When |
 |---|---|---|
-| `hello` | `{"version": "0.1.0", "time": "<ISO>"}` | on connect |
+| `hello` | `{"version": "1.0.0", "time": "<ISO>"}` | on connect |
 | `job` | Job (without `log_tail`) | on creation, every state change, and progress updates (throttled to ≤ 4 per second per job; the final state is always sent) |
 | `log` | LogLine | every log line of a running job |
 | `history` | HistoryItem | when a job is recorded |
